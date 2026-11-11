@@ -1,12 +1,22 @@
 
-import { Schema, model, models } from "mongoose";
+import { type HydratedDocument, type Model, model, models, Schema } from "mongoose";
 
-const userSchema = new Schema(
+export interface IUser {
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: "admin";
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const userSchema = new Schema<IUser>(
   {
     name: {
       type: String,
       required: true,
       trim: true,
+      index: true,
     },
     email: {
       type: String,
@@ -24,10 +34,12 @@ const userSchema = new Schema(
       type: String,
       enum: ["admin"],
       default: "admin",
+      required: true,
     },
   },
   { timestamps: true },
 );
 
-export const User =
-  models.User || model("User", userSchema);
+export type UserDocument = HydratedDocument<IUser>;
+
+export const User = (models.User as Model<IUser> | undefined) ?? model<IUser>("User", userSchema);

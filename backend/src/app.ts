@@ -1,15 +1,21 @@
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import { errorHandler, notFound } from "./middleware/security.js";
+import { authRouter } from "./routes/auth.js";
 
 export const app = express();
 
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: (process.env.CORS_ORIGIN || "http://localhost:3000").split(",").map((value) => value.trim()),
     credentials: true,
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "16kb" }));
+app.use(cookieParser());
 
 app.get("/", (_request, response) => {
   response.status(200).json({
@@ -24,3 +30,7 @@ app.get("/health", (_request, response) => {
     service: "doctor-tracker-backend",
   });
 });
+
+app.use("/api/auth", authRouter);
+app.use(notFound);
+app.use(errorHandler);
