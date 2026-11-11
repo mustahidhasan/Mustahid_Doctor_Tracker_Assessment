@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "./app.js";
+import { requireAdmin } from "./middleware/auth.js";
 import { User } from "./models/User.js";
 import { SESSION_COOKIE, signSession } from "./services/auth.js";
 import { ensureAdmin, validateSeedEnvironment } from "./scripts/seedAdmin.js";
@@ -67,6 +68,7 @@ describe("authentication API", () => {
     await agent.get("/api/auth/me").expect(200);
     const logout = await agent.post("/api/auth/logout").expect(200);
     expect(logout.headers["set-cookie"]?.[0]).toContain(`${SESSION_COOKIE}=;`);
+    await agent.get("/api/auth/me").expect(401);
   });
 
   it("rejects missing, invalid, expired, deleted, and unauthorized sessions", async () => {
@@ -83,6 +85,17 @@ describe("authentication API", () => {
 
   it("blocks untrusted browser origins", async () => {
     await request(app).post("/api/auth/login").set("Origin", "https://attacker.example").send({ email: "admin@example.com", password }).expect(403);
+  });
+
+  it("returns 403 when an authenticated identity lacks the admin role", () => {
+    const request = { auth: { userId: id, role: "user", name: "User", email: "user@example.com" } };
+    const status = vi.fn().mockReturnThis();
+    const json = vi.fn();
+    const next = vi.fn();
+    requireAdmin(request as never, { status, json } as never, next);
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith({ error: "Administrator access required" });
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("rate limits repeated failed login attempts", async () => {

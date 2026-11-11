@@ -1,5 +1,7 @@
 
-import { type HydratedDocument, type Model, model, models, Schema } from "mongoose";
+import mongoose, { type HydratedDocument, type Model } from "mongoose";
+
+const { model, models, Schema } = mongoose;
 
 export interface IUser {
   name: string;

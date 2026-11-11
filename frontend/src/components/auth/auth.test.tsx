@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "./LoginForm";
 import { LogoutButton } from "./LogoutButton";
+import { AuthGuard } from "./AuthGuard";
 import * as auth from "@/lib/auth";
 
 const replace = vi.fn();
@@ -20,6 +21,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("LoginForm", () => {
+  it("redirects an existing authenticated session to the dashboard", async () => {
+    vi.mocked(auth.getCurrentUser).mockResolvedValue({ id: "1", name: "Admin", email: "admin@example.com", role: "admin" });
+    render(<LoginForm />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
+  });
+
   it("validates input before requesting login", async () => {
     render(<LoginForm />);
     await screen.findByRole("button", { name: "Sign in securely" });
@@ -49,6 +56,22 @@ describe("LoginForm", () => {
     expect(screen.getByRole("button", { name: "Signing in…" })).toBeDisabled();
     resolveLogin?.({ id: "1", name: "Admin", email: "admin@example.com", role: "admin" });
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
+  });
+});
+
+describe("AuthGuard", () => {
+  it("redirects an unauthenticated or expired session without rendering protected content", async () => {
+    vi.mocked(auth.getCurrentUser).mockResolvedValue(null);
+    render(<AuthGuard>{() => <p>Private dashboard</p>}</AuthGuard>);
+    expect(screen.queryByText("Private dashboard")).not.toBeInTheDocument();
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
+  });
+
+  it("restores a valid session and renders protected content", async () => {
+    vi.mocked(auth.getCurrentUser).mockResolvedValue({ id: "1", name: "Admin", email: "admin@example.com", role: "admin" });
+    render(<AuthGuard>{(user) => <p>Welcome {user.name}</p>}</AuthGuard>);
+    expect(await screen.findByText("Welcome Admin")).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalledWith("/login");
   });
 });
 
