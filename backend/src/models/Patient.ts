@@ -1,9 +1,19 @@
 
-import mongoose from "mongoose";
+import mongoose, { type HydratedDocument, type Model, type Types } from "mongoose";
 
 const { Schema, model, models } = mongoose;
 
-const patientSchema = new Schema(
+export interface IPatient {
+  name: string;
+  doctorId: Types.ObjectId;
+  condition: string;
+  phone?: string;
+  email?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const patientSchema = new Schema<IPatient>(
   {
     name: {
       type: String,
@@ -38,5 +48,5 @@ patientSchema.index({ condition: 1 });
 patientSchema.index({ name: 1 });
 patientSchema.index({ createdAt: -1 });
 
-export const Patient =
-  models.Patient || model("Patient", patientSchema);
+export type PatientDocument = HydratedDocument<IPatient>;
+export const Patient = (models.Patient as Model<IPatient> | undefined) ?? model<IPatient>("Patient", patientSchema);
