@@ -17,13 +17,17 @@ interface SelectMenuProps {
   className?: string;
   /** Which edge the popover aligns to; use "right" for controls near the right edge of the page. */
   align?: "left" | "right";
+  /** Marks the control invalid (red border, aria-invalid) and links an error message. */
+  invalid?: boolean;
+  describedBy?: string;
+  disabled?: boolean;
 }
 
 /**
  * Custom-styled replacement for a native <select>: a button that opens a listbox popover.
  * Keyboard: ↑/↓, Home/End, Enter to choose, Escape or Tab to close; typing filters when searchable.
  */
-export function SelectMenu({ label, value, options, onChange, searchable = false, searchPlaceholder = "Search…", id, className = "", align = "left" }: SelectMenuProps) {
+export function SelectMenu({ label, value, options, onChange, searchable = false, searchPlaceholder = "Search…", id, className = "", align = "left", invalid = false, describedBy, disabled = false }: SelectMenuProps) {
   const generatedId = useId();
   const triggerId = id ?? `${generatedId}-trigger`;
   const listId = `${generatedId}-list`;
@@ -105,8 +109,9 @@ export function SelectMenu({ label, value, options, onChange, searchable = false
   return (
     <div ref={root} className={`relative ${className}`}>
       <button ref={trigger} id={triggerId} type="button" aria-label={label} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
+        aria-describedby={describedBy} disabled={disabled}
         onClick={() => (open ? closeMenu() : openMenu())} onKeyDown={onTriggerKeyDown}
-        className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-white px-3 py-2.5 text-left text-sm outline-none transition hover:border-slate-300 focus-visible:border-teal-600 focus-visible:ring-4 focus-visible:ring-teal-100 ${open ? "border-teal-600 ring-4 ring-teal-100" : "border-slate-200"}`}>
+        className={`flex w-full items-center justify-between gap-2 rounded-xl border bg-white px-3 py-2.5 text-left text-sm outline-none transition hover:border-slate-300 focus-visible:border-teal-600 focus-visible:ring-4 focus-visible:ring-teal-100 disabled:cursor-not-allowed disabled:bg-slate-50 ${open ? "border-teal-600 ring-4 ring-teal-100" : invalid ? "border-red-300" : "border-slate-200"}`}>
         <span className={`truncate ${isPlaceholder ? "text-slate-500" : "font-medium text-slate-900"}`}>{selected?.label}</span>
         <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}>
           <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />

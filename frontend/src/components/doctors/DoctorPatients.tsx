@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type FormEvent, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { errorMessage, fieldErrors, formatDate, type Patient, type PatientInput, trimInput, validatePatientInput } from "@/lib/doctors";
@@ -14,13 +15,14 @@ const FIELDS: Array<{ name: keyof PatientInput; label: string; type: string; pla
 ];
 
 interface DoctorPatientsProps {
+  doctorId: string;
   patients: Patient[];
   total: number;
   onAdd: (input: PatientInput) => Promise<void>;
   onRemove: (patient: Patient) => Promise<void>;
 }
 
-export function DoctorPatients({ patients, total, onAdd, onRemove }: DoctorPatientsProps) {
+export function DoctorPatients({ doctorId, patients, total, onAdd, onRemove }: DoctorPatientsProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<PatientInput>(emptyPatient);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -50,7 +52,10 @@ export function DoctorPatients({ patients, total, onAdd, onRemove }: DoctorPatie
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 id="doctor-patients-title" className="text-xl font-semibold text-slate-950">Associated patients</h2>
-          <p className="mt-1 text-sm text-slate-500">{total} patient{total === 1 ? "" : "s"} assigned</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {total} patient{total === 1 ? "" : "s"} assigned
+            {total > 0 && <> · <Link href={`/patients?doctorId=${doctorId}`} className="font-medium text-teal-700 hover:text-teal-900">View in Patients</Link></>}
+          </p>
         </div>
         <button type="button" onClick={toggle} aria-expanded={open} aria-controls="add-patient-form"
           className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-4 ${open ? "border border-slate-200 text-slate-700 hover:bg-slate-50 focus-visible:ring-slate-200" : "bg-teal-700 text-white shadow-sm hover:bg-teal-800 focus-visible:ring-teal-200"}`}>
@@ -91,7 +96,7 @@ export function DoctorPatients({ patients, total, onAdd, onRemove }: DoctorPatie
           {patients.map((patient) => (
             <li key={patient._id} className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
               <div className="min-w-0">
-                <h3 className="font-semibold text-slate-900">{patient.name}</h3>
+                <h3 className="font-semibold text-slate-900"><Link href={`/patients/${patient._id}`} className="hover:text-teal-700 focus:outline-none focus-visible:underline">{patient.name}</Link></h3>
                 <p className="mt-0.5 text-sm text-slate-600">{patient.condition}</p>
                 <p className="mt-1 break-all text-xs text-slate-500">{[patient.phone, patient.email, `Added ${formatDate(patient.createdAt)}`].filter(Boolean).join(" · ")}</p>
               </div>
@@ -102,7 +107,7 @@ export function DoctorPatients({ patients, total, onAdd, onRemove }: DoctorPatie
         </ul>
       )}
       {total > patients.length && patients.length > 0 && (
-        <p className="mt-3 text-center text-xs text-slate-500">Showing the {patients.length} most recent of {total} patients.</p>
+        <p className="mt-3 text-center text-xs text-slate-500">Showing the {patients.length} most recent of {total} patients. <Link href={`/patients?doctorId=${doctorId}`} className="font-medium text-teal-700 hover:text-teal-900">View all</Link></p>
       )}
 
       {pendingRemoval && (

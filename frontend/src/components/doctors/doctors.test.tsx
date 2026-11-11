@@ -238,8 +238,9 @@ describe("DoctorDetails", () => {
     expect(await screen.findByRole("heading", { name: "Dr. Ada" })).toBeInTheDocument();
     expect(screen.getByText("Cardiology")).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
-    expect(screen.getByText("1 patient assigned")).toBeInTheDocument();
-    expect(screen.getByText("Patient One")).toBeInTheDocument();
+    expect(screen.getByText(/1 patient assigned/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Patient One" })).toHaveAttribute("href", "/patients/p1");
+    expect(screen.getByRole("link", { name: "View in Patients" })).toHaveAttribute("href", "/patients?doctorId=d1");
   });
 
   it("shows not found without a retry for a missing doctor", async () => {
@@ -270,7 +271,7 @@ describe("DoctorDetails", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save patient" }));
     await waitFor(() => expect(api.addDoctorPatient).toHaveBeenCalledWith("d1", { name: "Patient One", condition: "Follow-up", phone: "", email: "" }));
     expect(await screen.findByText("Patient One")).toBeInTheDocument();
-    expect(screen.getByText("1 patient assigned")).toBeInTheDocument();
+    expect(screen.getByText(/1 patient assigned/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove Patient One" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove patient" }));

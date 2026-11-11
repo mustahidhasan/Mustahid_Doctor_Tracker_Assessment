@@ -4,6 +4,7 @@ import express from "express";
 import { errorHandler, notFound } from "./middleware/security.js";
 import { authRouter } from "./routes/auth.js";
 import { doctorRouter } from "./routes/doctor.routes.js";
+import { patientRouter } from "./routes/patient.routes.js";
 
 export const app = express();
 
@@ -34,5 +35,6 @@ app.get("/health", (_request, response) => {
 
 app.use("/api/auth", authRouter);
 app.use("/api/doctors", doctorRouter);
+app.use("/api/patients", patientRouter);
 app.use(notFound);
 app.use(errorHandler);

@@ -1,26 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import * as doctorService from "../services/doctor.service.js";
-import { doctorInputSchema, doctorListQuerySchema, doctorUpdateSchema, objectIdSchema, patientInputSchema } from "../validators/doctor.validator.js";
-
-function validationError(response: Response, issues: { path: PropertyKey[]; message: string }[]) {
-  return response.status(400).json({
-    error: "Validation failed",
-    details: issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
-  });
-}
-
-function validId(value: string | undefined, response: Response): value is string {
-  const result = objectIdSchema.safeParse(value);
-  if (!result.success) {
-    validationError(response, result.error.issues);
-    return false;
-  }
-  return true;
-}
-
-function routeParam(value: string | string[] | undefined): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
+import { doctorInputSchema, doctorListQuerySchema, doctorUpdateSchema, patientInputSchema } from "../validators/doctor.validator.js";
+import { routeParam, validationError, validId } from "./http.js";
 
 export async function create(request: Request, response: Response, next: NextFunction) {
   const result = doctorInputSchema.safeParse(request.body);

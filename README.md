@@ -64,7 +64,7 @@ The backend reads `MONGODB_URI` and connects through `backend/src/config/db.ts`.
 - `GET /api/auth/me` returns the sanitized active administrator or `401`.
 - `POST /api/auth/logout` clears the session cookie.
 
-Protected frontend routes are `/dashboard`, `/doctors`, and `/patients`. Cookie presence is checked before rendering and the backend independently validates the session; frontend guards are not treated as API authorization.
+Protected frontend routes are `/dashboard`, `/doctors`, `/doctors/:id`, `/patients`, and `/patients/:id`. Cookie presence is checked before rendering and the backend independently validates the session; frontend guards are not treated as API authorization.
 
 ## Doctor Management
 
@@ -143,6 +143,55 @@ Each patient references exactly one doctor through `doctorId`. The nested endpoi
 - Email has no index. Search uses unanchored, case-insensitive regex, which cannot use a B-tree index anyway.
 - `limit` is capped at 100. The doctor's patient list is capped at the newest 100, with the true total returned separately.
 
+## Patient Management
+
+### Features
+
+- Patients list at `/patients`: debounced search (name, condition, email), searchable condition and doctor filters, created-date range, sorting (newest, oldest, name A–Z, name Z–A), and server-side pagination. Each row shows the assigned doctor with a link to their profile.
+- Add and edit patients in a modal form. The assigned doctor is chosen from a searchable dropdown, and editing that field reassigns the patient. Validation runs in the browser first, and server errors appear next to the relevant field. The submit button is disabled while saving.
+- Patient details at `/patients/:id`: name, condition, assigned doctor (linked), phone, email, created date, and last-updated time, with edit and delete actions.
+- Deletion always asks for confirmation. Loading skeletons, empty states, error states with retry, toast notifications, and responsive layouts (table on desktop, cards on mobile) match the Doctors pages.
+- `/patients?doctorId=<id>` opens the list filtered to one doctor. A doctor's page links to it ("View in Patients"), and each patient name on a doctor's page opens that patient's record.
+
+### API reference
+
+All endpoints require an authenticated admin session (`401` otherwise). `POST`, `PATCH`, and `DELETE` also reject untrusted browser origins with `403`.
+
+| Method | Endpoint | Success | Purpose |
+|---|---|---|---|
+| `GET` | `/api/patients` | `200 { data, pagination }` | List, search, filter, sort, and paginate patients |
+| `GET` | `/api/patients/filter-options` | `200 { data: { conditions, doctors } }` | Distinct conditions and the doctor list (up to 1000) for filters and the form |
+| `GET` | `/api/patients/:id` | `200 { data }` | Patient details |
+| `POST` | `/api/patients` | `201 { data }` | Create a patient (`doctorId` required) |
+| `PATCH` | `/api/patients/:id` | `200 { data }` | Partial update. Changing `doctorId` reassigns the patient. `""` for `phone` or `email` clears that value. |
+| `DELETE` | `/api/patients/:id` | `204` | Delete a patient |
+
+List and detail responses add `doctor: { _id, name, specialization, hospital }` to each patient, filled in with a single batched `populate` per page. Errors use the shared shape `{ error, details? }`. Assigning a nonexistent doctor returns `400` with `details: [{ field: "doctorId", ... }]`. A missing patient returns `404`. Invalid IDs and invalid query parameters return `400`.
+
+List query parameters: `page` (1–10000), `limit` (1–100, default 10), `search` (up to 100 characters, escaped, case-insensitive across name, condition, and email), `condition` (exact), `doctorId` (ObjectId), `dateFrom` and `dateTo` (`YYYY-MM-DD`, UTC, inclusive), and `sort` (`newest` by default, `oldest`, `name`, `name_desc`). Every sort uses `_id` as a tiebreaker.
+
+### Patient schema
+
+| Field | Rules |
+|---|---|
+| `name` | Required. Trimmed. Max 120 characters. |
+| `condition` | Required. Trimmed. Max 200 characters. |
+| `doctorId` | Required ObjectId reference to `Doctor`. Must point to an existing doctor on create and on reassignment. |
+| `phone` | Optional. Same format as doctor phones (7–15 digits). |
+| `email` | Optional. Valid format. Trimmed and lowercased. |
+| `createdAt`, `updatedAt` | Mongoose timestamps. |
+
+Indexes `{ doctorId: 1, createdAt: -1 }`, `{ condition: 1 }`, `{ name: 1 }`, and `{ createdAt: -1 }` already match the query patterns: doctor filtering and listing, the condition filter and its options, name sorts in both directions, and date sorts and ranges. No schema or index changes were needed.
+
+### Consistency between Doctors and Patients
+
+Both pages read the same `patients` collection, so a change made in one place shows up everywhere:
+
+- The Module 4 nested endpoints (`/api/doctors/:id/patients`) still work and now call the same patient-creation and patient-deletion service as `/api/patients`, so both paths apply the same rules.
+- Patients created from `/patients` appear under their doctor, and patients added from a doctor's page appear in `/patients`.
+- Reassigning a patient changes only `doctorId`. The patient leaves the previous doctor's list and joins the new one.
+- Deleting a patient removes it from both views. Doctor deletion is still blocked while patients are assigned (`409`).
+
 ## Development seed data
 
 `backend/src/scripts/seedData.ts` fills a development database with fictional data, so you can try search, filters, date ranges, pagination, and the doctor–patient screens with realistic volume.
@@ -198,8 +247,8 @@ npm test --prefix frontend
 
 Tests use mocks and do not connect to or modify MongoDB Atlas.
 
-- Backend (`backend/src/*.test.ts`): authentication, plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
-- Frontend (`frontend/src/components/**/*.test.tsx`): login flow, plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
+- Backend (`backend/src/*.test.ts`): authentication; patient API security, validation, CRUD, reassignment, nonexistent-doctor rejection, query construction, database-error masking, consistency between doctors and patients, and the patient filters run against the generated seed data; development seed generation, safety guards, and idempotency; plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
+- Frontend (`frontend/src/components/**/*.test.tsx`): login flow; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
 
 ### Manually checking doctor management
 
@@ -211,6 +260,14 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 4. Try to delete a doctor who has patients. You should see the `409` message.
 5. Run `curl -i http://localhost:5000/api/doctors` without a cookie. It should return `401`.
 
+### Manually checking patient management
+
+1. Run `ALLOW_DEV_SEED=true npm run seed:data --prefix backend` (safe to repeat), then open **Patients**. You should see at least 150 patients across 15 pages.
+2. Search, filter by condition, doctor, and date, change the sort, and page through the list.
+3. Add a patient, then open the assigned doctor and confirm the patient is listed there.
+4. Edit the patient and change the assigned doctor. Confirm the patient moved from the old doctor's page to the new one.
+5. Delete the patient and confirm it is gone from both pages.
+
 ## Known limitations
 
 - Search is an unanchored regex across four fields, so it scans documents. This is fine at assessment scale. A larger dataset would call for Atlas Search or a normalized, prefix-indexed search field.
@@ -218,7 +275,10 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 - Offset pagination (`skip`) slows down on very deep pages. Cursor pagination would be the next step for large collections.
 - The doctor delete restriction and patient creation each check, then write, without a transaction. A concurrent request between the two steps could still cause a rare inconsistency. Multi-document transactions would close that gap.
 - Filters and page live in component state, not the URL, so a refresh resets them.
-- The details page lists the newest 100 patients. Full patient browsing belongs to the Patients module.
+- A doctor's details page lists their newest 100 patients. "View all" opens `/patients` filtered to that doctor.
+- The patient form and doctor filter load up to 1000 doctors. Beyond that, a server-side doctor search endpoint would be needed.
+- Patient search is an unanchored regex across name, condition, and email, with the same scaling caveat as doctor search.
+- Patient creation and reassignment check that the doctor exists, then write. A doctor deleted between those two steps could leave a dangling reference, which the UI shows as "Unassigned".
 
 Validate the local launcher with `bash -n run.sh`, then use `./run.sh`. Confirm `http://localhost:5000/health` returns `200` and an unauthenticated request to `http://localhost:5000/api/auth/me` returns `401`.
 

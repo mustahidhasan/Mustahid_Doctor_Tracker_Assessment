@@ -123,7 +123,7 @@ export function DoctorDetails({ id }: { id: string }) {
         </div>
       </section>
 
-      <DoctorPatients patients={patients?.data ?? []} total={patientTotal} onAdd={addPatient} onRemove={removePatient} />
+      <DoctorPatients doctorId={id} patients={patients?.data ?? []} total={patientTotal} onAdd={addPatient} onRemove={removePatient} />
 
       {editing && (
         <Modal title="Edit doctor" description="Update this doctor's profile details." onClose={() => setEditing(false)}>

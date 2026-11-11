@@ -15,13 +15,21 @@ export function requireTrustedOrigin(request: Request, response: Response, next:
   return next();
 }
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Cookie-authenticated state changes must come from a trusted browser origin (CSRF defence in depth). */
+export function requireTrustedOriginForWrites(request: Request, response: Response, next: NextFunction) {
+  if (SAFE_METHODS.has(request.method)) return next();
+  return requireTrustedOrigin(request, response, next);
+}
+
 export function notFound(_request: Request, response: Response) {
   response.status(404).json({ error: "Route not found" });
 }
 
 export function errorHandler(error: unknown, _request: Request, response: Response, _next: NextFunction) {
   if (error instanceof SyntaxError && "body" in error) return response.status(400).json({ error: "Malformed JSON request" });
-  if (error instanceof AppError) return response.status(error.statusCode).json({ error: error.message });
+  if (error instanceof AppError) return response.status(error.statusCode).json({ error: error.message, ...(error.details ? { details: error.details } : {}) });
   // Never expose raw MongoDB/Mongoose errors; map known input-related failures to a generic 400.
   if (error instanceof mongoose.Error.CastError || error instanceof mongoose.Error.ValidationError) {
     return response.status(400).json({ error: "Invalid request data" });
