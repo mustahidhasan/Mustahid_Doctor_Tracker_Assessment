@@ -27,7 +27,9 @@ npm test --prefix backend && npm test --prefix frontend
 ## Deploy (Vercel)
 
 One-time setup:
-1. Create two Vercel projects from this repo: `doctor-tracker-api` (Root Directory `backend`) and `doctor-tracker-web` (Root Directory `frontend`).
+1. Create two Vercel projects from this repo:
+   - `doctor-tracker-api`: Root Directory `backend`, Framework Preset **Other**, everything else default
+   - `doctor-tracker-web`: Root Directory `frontend`, Framework Preset **Next.js**
 2. Set the environment variables in Vercel:
    - api project: `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CORS_ORIGIN` (the frontend URL)
    - web project: `API_PROXY_TARGET` (the backend URL)

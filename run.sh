@@ -116,9 +116,9 @@ stop_group() {
 cleanup() {
   test "$STOPPING" -eq 0 || return 0
   STOPPING=1
-  trap - INT TERM EXIT
-  echo
-  echo "Stopping Doctor Tracker services..."
+  trap - INT TERM HUP PIPE EXIT
+  # Messages must never abort cleanup (e.g. when stdout is a closed pipe or terminal).
+  { echo; echo "Stopping Doctor Tracker services..."; } 2>/dev/null || true
   stop_group "$BACKEND_PID"
   stop_group "$FRONTEND_PID"
   attempts=0
@@ -130,7 +130,7 @@ cleanup() {
   if group_alive "$BACKEND_PID"; then kill -KILL -- "-$BACKEND_PID" 2>/dev/null || true; fi
   if group_alive "$FRONTEND_PID"; then kill -KILL -- "-$FRONTEND_PID" 2>/dev/null || true; fi
   wait 2>/dev/null || true
-  echo "Stopped."
+  echo "Stopped." 2>/dev/null || true
 }
 
 on_signal() {
@@ -138,8 +138,11 @@ on_signal() {
   exit "$1"
 }
 
+# Ctrl+C, kill, a closed terminal (HUP) and a closed output pipe (PIPE) all stop both services.
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
+trap 'on_signal 141 >/dev/null 2>&1' PIPE
 trap cleanup EXIT
 
 echo "Starting backend:  http://localhost:$BACKEND_PORT"
