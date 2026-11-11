@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +10,10 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  async rewrites() {
+    const target = process.env.API_PROXY_TARGET || "http://localhost:5000";
+    return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
   },
 };
 
