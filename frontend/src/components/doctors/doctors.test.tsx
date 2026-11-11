@@ -39,7 +39,7 @@ const lastQuery = () => vi.mocked(api.listDoctors).mock.lastCall![0];
 const renderList = async () => { render(<DoctorsManager />); await screen.findAllByText("Dr. Ada"); };
 /** Opens a custom SelectMenu by its accessible name and picks an option. */
 const choose = (menu: string, option: string) => {
-  fireEvent.click(screen.getByRole("button", { name: menu }));
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${menu}:`) }));
   fireEvent.click(within(screen.getByRole("listbox", { name: menu })).getByRole("option", { name: option }));
 };
 
@@ -67,11 +67,11 @@ describe("DoctorsManager list", () => {
   it("applies specialization, hospital, date, and sort filters", async () => {
     await renderList();
     await waitFor(() => expect(api.getDoctorFilterOptions).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("button", { name: "Filter specialization" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Filter specialization:/ }));
     expect(await screen.findByRole("option", { name: "Neurology" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: "Neurology" }));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Filter specialization" })).toHaveTextContent("Neurology");
+    expect(screen.getByRole("button", { name: /^Filter specialization:/ })).toHaveTextContent("Neurology");
     await waitFor(() => expect(lastQuery()).toMatchObject({ specialization: "Neurology" }));
     choose("Filter hospital", "City Hospital");
     fireEvent.change(screen.getByLabelText("Created from"), { target: { value: "2026-01-01" } });
@@ -116,7 +116,7 @@ describe("DoctorsManager list", () => {
     render(<DoctorsManager />);
     expect(await screen.findByText("No doctors yet")).toBeInTheDocument();
     await waitFor(() => expect(api.getDoctorFilterOptions).toHaveBeenCalled());
-    await waitFor(() => { fireEvent.click(screen.getByRole("button", { name: "Filter specialization" })); expect(screen.getByRole("option", { name: "Cardiology" })).toBeInTheDocument(); });
+    await waitFor(() => { fireEvent.click(screen.getByRole("button", { name: /^Filter specialization:/ })); expect(screen.getByRole("option", { name: "Cardiology" })).toBeInTheDocument(); });
     fireEvent.click(screen.getByRole("option", { name: "Cardiology" }));
     expect(await screen.findByText("No doctors match your filters")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
@@ -163,6 +163,25 @@ describe("DoctorsManager create, edit, delete", () => {
     expect(await screen.findByText("Dr. New was added.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(vi.mocked(api.listDoctors).mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it("suggests existing specializations and hospitals in custom dropdowns, and accepts new values", async () => {
+    await renderList();
+    await waitFor(() => expect(api.getDoctorFilterOptions).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /Add doctor/ }));
+    const dialog = within(screen.getByRole("dialog"));
+    const specialization = dialog.getByRole("combobox", { name: /Specialization/ });
+    fireEvent.change(specialization, { target: { value: "neur" } });
+    fireEvent.click(dialog.getByRole("option", { name: "Neurology" }));
+    expect(specialization).toHaveValue("Neurology");
+    const hospital = dialog.getByRole("combobox", { name: /Hospital/ });
+    fireEvent.focus(hospital);
+    expect(dialog.getByRole("option", { name: "City Hospital" })).toBeInTheDocument();
+    fireEvent.change(hospital, { target: { value: "Brand New Clinic" } });
+    fill({ Name: "Dr. New", Phone: "+1 555 010 2000", Email: "new@example.com" });
+    fireEvent.click(dialog.getByRole("button", { name: "Add doctor" }));
+    await waitFor(() => expect(api.createDoctor).toHaveBeenCalledWith(expect.objectContaining({ specialization: "Neurology", hospital: "Brand New Clinic" })));
+    expect(document.querySelector("datalist")).toBeNull();
   });
 
   it("disables duplicate submissions while saving", async () => {
@@ -308,5 +327,48 @@ describe("doctor API helpers", () => {
     expect(api.validateDoctorInput({ name: "A", specialization: "B", hospital: "C", phone: "+880 1700-000000", email: "a@b.co" })).toEqual({});
     expect(api.validatePatientInput({ name: "A", condition: "B", phone: "", email: "" })).toEqual({});
     expect(api.validatePatientInput({ name: "A", condition: "B", phone: "abc", email: "x" })).toMatchObject({ phone: expect.any(String), email: expect.any(String) });
+  });
+});
+
+describe("DoctorsManager edge cases", () => {
+  it("ignores an older, slower search response that arrives after a newer one", async () => {
+    let releaseSlow!: (value: api.DoctorList) => void;
+    const newer: api.Doctor = { ...doctor, _id: "d2", name: "Dr. Newer" };
+    vi.mocked(api.listDoctors).mockImplementation((query, signal) => {
+      if (query.search === "ad") return new Promise((resolve, reject) => { releaseSlow = resolve; signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))); });
+      if (query.search === "newer") return Promise.resolve({ data: [newer], pagination });
+      return Promise.resolve({ data: [doctor], pagination });
+    });
+    await renderList();
+    fireEvent.change(screen.getByLabelText("Search doctors"), { target: { value: "ad" } });
+    await waitFor(() => expect(lastQuery()).toMatchObject({ search: "ad" }), { timeout: 1500 });
+    fireEvent.change(screen.getByLabelText("Search doctors"), { target: { value: "newer" } });
+    expect((await screen.findAllByText("Dr. Newer", {}, { timeout: 1500 })).length).toBeGreaterThan(0);
+    await act(async () => releaseSlow({ data: [{ ...doctor, name: "Dr. Stale" }], pagination }));
+    expect(screen.queryByText("Dr. Stale")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Dr. Newer").length).toBeGreaterThan(0);
+  });
+
+  it("steps back a page when the current page becomes empty after a deletion", async () => {
+    vi.mocked(api.listDoctors).mockImplementation(async (query) => query.page === 3
+      ? { data: [], pagination: { page: 3, limit: 10, total: 20, totalPages: 2, hasNextPage: false, hasPreviousPage: true } }
+      : { data: [doctor], pagination: { page: query.page, limit: 10, total: 21, totalPages: 3, hasNextPage: query.page < 3, hasPreviousPage: query.page > 1 } });
+    await renderList();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await waitFor(() => expect(lastQuery()).toMatchObject({ page: 2 }));
+    await waitFor(() => expect(vi.mocked(api.listDoctors).mock.calls.some(([query]) => query.page === 3)).toBe(true));
+    await waitFor(() => expect(lastQuery()).toMatchObject({ page: 2 })); // stepped back from the empty page 3
+    expect(await screen.findByText("Page 2 of 3")).toBeInTheDocument();
+  });
+
+  it("refreshes the list and filter options after a successful edit", async () => {
+    await renderList();
+    const listCalls = vi.mocked(api.listDoctors).mock.calls.length;
+    const optionCalls = vi.mocked(api.getDoctorFilterOptions).mock.calls.length;
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit Dr. Ada" })[0]!);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(vi.mocked(api.listDoctors).mock.calls.length).toBeGreaterThan(listCalls));
+    expect(vi.mocked(api.getDoctorFilterOptions).mock.calls.length).toBeGreaterThan(optionCalls);
   });
 });

@@ -1,5 +1,7 @@
 /** Shared same-origin API utilities for all admin modules. */
 
+import { clearSession, expiredLoginUrl } from "./auth";
+
 export interface FieldError { field: string; message: string; }
 export interface Pagination { page: number; limit: number; total: number; totalPages: number; hasNextPage: boolean; hasPreviousPage: boolean; }
 
@@ -20,7 +22,12 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ApiError("Unable to reach the server. Check your connection and try again.", 0);
   }
   if (response.status === 401) {
-    if (typeof window !== "undefined") window.location.replace(new URL("/login", window.location.origin));
+    if (typeof window !== "undefined") {
+      // Clear the stale HttpOnly cookie first so /login does not bounce back here, then return
+      // the user to the page they were on after signing in again.
+      await clearSession();
+      window.location.replace(new URL(expiredLoginUrl(`${window.location.pathname}${window.location.search}`), window.location.origin));
+    }
     throw new ApiError("Your session has expired. Please sign in again.", 401);
   }
   if (response.status === 204) return undefined as T;

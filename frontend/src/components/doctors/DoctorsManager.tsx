@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/Button";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EmptyState, LoadError } from "@/components/ui/EmptyState";
@@ -97,17 +99,8 @@ export function DoctorsManager() {
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-700">Clinical network</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Doctors</h1>
-          <p className="mt-2 max-w-2xl text-slate-600">Search, filter, and manage doctors and the patients assigned to them.</p>
-        </div>
-        <button type="button" onClick={() => setForm({ mode: "create" })}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-teal-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200">
-          <span aria-hidden="true" className="text-lg leading-none">+</span> Add doctor
-        </button>
-      </header>
+      <PageHeader eyebrow="Clinical network" title="Doctors" description="Search, filter, and manage doctors and the patients assigned to them."
+        action={<Button variant="primary" onClick={() => setForm({ mode: "create" })} className="w-full sm:w-auto"><span aria-hidden="true" className="text-lg leading-none">+</span> Add doctor</Button>} />
 
       <DoctorFilters filters={filters} options={options} onChange={changeFilters} onReset={resetFilters} />
 

@@ -3,7 +3,8 @@
 import { memo, useMemo } from "react";
 import { formatNumber, type PatientsPerDoctorResponse } from "@/lib/dashboard";
 import { ChartCard } from "./ChartCard";
-import { barChartHeight, type BarRow, HorizontalBarChart } from "./HorizontalBarChart";
+import { barChartHeight, type BarRow } from "./barLayout";
+import { LazyHorizontalBarChart as HorizontalBarChart } from "./lazyCharts";
 
 interface PatientsPerDoctorChartProps {
   data?: PatientsPerDoctorResponse;

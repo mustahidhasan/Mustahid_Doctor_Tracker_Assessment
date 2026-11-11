@@ -5,6 +5,7 @@ import {
   createDashboardClient, type DashboardPeriod, dashboardUrls, type DistributionResponse, type PatientsPerDoctorResponse,
   type SummaryResponse, toTrendPoints, type TrendResponse, trendSummary, validateCustomRange,
 } from "@/lib/dashboard";
+import { niceAxisMax } from "./barLayout";
 import { truncateLabel } from "./chartTheme";
 import { DashboardManager } from "./DashboardManager";
 import { toDistributionRows } from "./DistributionChart";
@@ -119,12 +120,13 @@ describe("dashboard data layer", () => {
 
   it("sends same-origin credentials and redirects to login on 401", async () => {
     const replace = vi.fn();
-    vi.stubGlobal("location", { ...window.location, origin: "http://localhost:3000", replace });
+    vi.stubGlobal("location", { ...window.location, origin: "http://localhost:3000", pathname: "/dashboard", search: "", replace });
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "Authentication required" }), { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(api("/api/dashboard/summary?period=30d")).rejects.toMatchObject({ status: 401 });
     expect(fetchMock).toHaveBeenCalledWith("/api/dashboard/summary?period=30d", expect.objectContaining({ credentials: "same-origin" }));
-    expect(replace).toHaveBeenCalledWith(new URL("/login", "http://localhost:3000"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" })); // stale cookie cleared
+    expect(replace).toHaveBeenCalledWith(new URL("/login?expired=1&next=%2Fdashboard", "http://localhost:3000"));
     vi.unstubAllGlobals();
   });
 
@@ -166,6 +168,10 @@ describe("dashboard data layer", () => {
     expect(validateCustomRange("2010-01-01", "2026-01-01")).toMatch(/at most/);
   });
 
+  it("rounds axis maxima to whole-number nice values", () => {
+    expect([0, 1, 3, 5, 7, 11, 14, 22, 48, 150].map(niceAxisMax)).toEqual([1, 1, 3, 5, 8, 15, 15, 25, 50, 150]);
+  });
+
   it("shortens long labels for narrow screens", () => {
     expect(truncateLabel("Dr. Leila Nakamura-Fernandez", 14)).toBe("Dr. Leila Nak…");
     expect(truncateLabel("Dr. Ada", 14)).toBe("Dr. Ada");
@@ -200,7 +206,8 @@ describe("DashboardManager", () => {
     expect(screen.getByText(/5 patients across 2 condition categories\. Most common: Asthma/)).toBeInTheDocument();
     const figures = screen.getAllByRole("img");
     expect(figures).toHaveLength(4);
-    expect(document.querySelectorAll(".recharts-surface").length).toBeGreaterThanOrEqual(4);
+    // Plots load lazily (separate Recharts chunk); wait for all four SVGs.
+    await waitFor(() => expect(document.querySelectorAll(".recharts-surface").length).toBeGreaterThanOrEqual(4));
     expect(screen.getByText("Showing", { exact: false })).toHaveTextContent("Showing Oct 13 – Nov 11, 2026 (UTC)");
   });
 
@@ -338,5 +345,27 @@ describe("DashboardManager", () => {
     expect(within(radio).getByText("7D")).toHaveClass("sm:hidden");
     await waitFor(() => kpi("Total doctors"));
     expect(kpi("Total doctors").parentElement).toHaveClass("grid-cols-1", "sm:grid-cols-2", "xl:grid-cols-4");
+  });
+});
+
+describe("deferred chart drawing", () => {
+  it("draws a chart only once it approaches the viewport", async () => {
+    const observers: Array<{ callback: IntersectionObserverCallback; target?: Element }> = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      private entry: { callback: IntersectionObserverCallback; target?: Element };
+      constructor(callback: IntersectionObserverCallback) { this.entry = { callback }; observers.push(this.entry); }
+      observe(target: Element) { this.entry.target = target; }
+      disconnect() {}
+      unobserve() {}
+      takeRecords() { return []; }
+    });
+    renderDashboard();
+    await loaded();
+    await screen.findByText(/patients registered between/);
+    expect(document.querySelectorAll(".recharts-surface")).toHaveLength(0); // nothing drawn off-screen
+    const trendObserver = observers.find((observer) => observer.target?.closest("section")?.querySelector("h2")?.textContent === "Patient registrations")!;
+    await act(async () => trendObserver.callback([{ isIntersecting: true, target: trendObserver.target! } as IntersectionObserverEntry], {} as IntersectionObserver));
+    await waitFor(() => expect(document.querySelectorAll(".recharts-surface")).toHaveLength(1));
+    vi.unstubAllGlobals();
   });
 });

@@ -68,7 +68,8 @@ export const SummaryCards = memo(function SummaryCards({ summary, periodLabel, l
   const plural = (count: number, noun: string) => `${formatNumber(count)} ${noun}${count === 1 ? "" : "s"}`;
 
   return (
-    <div className="space-y-4">
+    <section aria-labelledby="key-statistics-heading" className="space-y-4">
+      <h2 id="key-statistics-heading" className="sr-only">Key statistics</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="Total doctors" icon="doctor" scope="all-time" loading={show} value={s ? formatNumber(s.totalDoctors) : "—"}
           description={s ? `${plural(s.newDoctors, "doctor")} added in the ${periodLabel.toLowerCase()}.` : "Registered doctors."} />
@@ -87,6 +88,6 @@ export const SummaryCards = memo(function SummaryCards({ summary, periodLabel, l
           value={s?.topCondition ? s.topCondition.label : "—"}
           description={s?.topCondition ? `${plural(s.topCondition.count, "patient")} have this condition.` : "No patients yet."} />
       </div>
-    </div>
+    </section>
   );
 });

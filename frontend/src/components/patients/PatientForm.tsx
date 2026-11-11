@@ -1,5 +1,7 @@
 "use client";
 
+import { ComboboxInput } from "@/components/ui/ComboboxInput";
+import { Button } from "@/components/ui/Button";
 import { type FormEvent, useMemo, useState } from "react";
 import { SelectMenu, type SelectOption } from "@/components/ui/SelectMenu";
 import { errorMessage, fieldErrors, trimInput } from "@/lib/api";
@@ -62,9 +64,9 @@ export function PatientForm({ initial, doctors, conditions = [], submitLabel, on
       </div>
       <div>
         <label htmlFor="patient-form-condition" className="mb-1.5 block text-sm font-medium text-slate-700">Condition <span className="text-red-600" aria-hidden="true">*</span></label>
-        <input id="patient-form-condition" autoComplete="off" placeholder="e.g. Hypertension follow-up" maxLength={200} required disabled={submitting} list={conditions.length ? "patient-form-condition-options" : undefined}
-          value={form.condition} onChange={(event) => update("condition", event.target.value)} aria-invalid={Boolean(errors.condition)} aria-describedby={described("condition")} className={inputClass(Boolean(errors.condition))} />
-        {conditions.length > 0 && <datalist id="patient-form-condition-options">{conditions.map((condition) => <option key={condition} value={condition} />)}</datalist>}
+        <ComboboxInput id="patient-form-condition" name="condition" value={form.condition} onChange={(value) => update("condition", value)} options={conditions}
+          placeholder="e.g. Hypertension follow-up" maxLength={200} required disabled={submitting}
+          invalid={Boolean(errors.condition)} describedBy={described("condition")} className={inputClass(Boolean(errors.condition))} />
         {error("condition")}
       </div>
       <div>
@@ -75,13 +77,13 @@ export function PatientForm({ initial, doctors, conditions = [], submitLabel, on
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label htmlFor="patient-form-phone" className="mb-1.5 block text-sm font-medium text-slate-700">Phone <span className="font-normal text-slate-400">(optional)</span></label>
+          <label htmlFor="patient-form-phone" className="mb-1.5 block text-sm font-medium text-slate-700">Phone <span className="font-normal text-slate-500">(optional)</span></label>
           <input id="patient-form-phone" type="tel" autoComplete="off" placeholder="+1 555 010 2000" maxLength={30} disabled={submitting}
             value={form.phone} onChange={(event) => update("phone", event.target.value)} aria-invalid={Boolean(errors.phone)} aria-describedby={described("phone")} className={inputClass(Boolean(errors.phone))} />
           {error("phone")}
         </div>
         <div>
-          <label htmlFor="patient-form-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email <span className="font-normal text-slate-400">(optional)</span></label>
+          <label htmlFor="patient-form-email" className="mb-1.5 block text-sm font-medium text-slate-700">Email <span className="font-normal text-slate-500">(optional)</span></label>
           <input id="patient-form-email" type="email" autoComplete="off" placeholder="name@example.com" maxLength={254} disabled={submitting}
             value={form.email} onChange={(event) => update("email", event.target.value)} aria-invalid={Boolean(errors.email)} aria-describedby={described("email")} className={inputClass(Boolean(errors.email))} />
           {error("email")}
@@ -90,12 +92,8 @@ export function PatientForm({ initial, doctors, conditions = [], submitLabel, on
       {errors.form && <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{errors.form}</p>}
       {Object.keys(errors).length > 0 && !errors.form && <p className="sr-only" role="alert">Please correct the highlighted fields.</p>}
       <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end">
-        <button type="button" onClick={onCancel} disabled={submitting}
-          className="rounded-xl border border-slate-200 px-4 py-2.5 font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-200 disabled:opacity-60">Cancel</button>
-        <button type="submit" disabled={submitting}
-          className="rounded-xl bg-teal-700 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-teal-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200 disabled:cursor-not-allowed disabled:opacity-60">
-          {submitting ? "Saving…" : submitLabel ?? (initial ? "Save changes" : "Add patient")}
-        </button>
+        <Button onClick={onCancel} disabled={submitting}>Cancel</Button>
+        <Button type="submit" variant="primary" loading={submitting} loadingText="Saving…">{submitLabel ?? (initial ? "Save changes" : "Add patient")}</Button>
       </div>
     </form>
   );

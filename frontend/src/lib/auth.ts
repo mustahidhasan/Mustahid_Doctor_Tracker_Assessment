@@ -29,3 +29,26 @@ export async function logout(): Promise<void> {
   const response = await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
   if (!response.ok && response.status !== 401) throw new Error("Unable to sign out");
 }
+
+/** Clears a stale/expired HttpOnly session cookie (server-side), ignoring failures. */
+export async function clearSession(): Promise<void> {
+  await logout().catch(() => undefined);
+}
+
+/**
+ * Only same-site relative paths are accepted as a post-login destination (no open redirects:
+ * rejects absolute URLs, protocol-relative "//host", and backslash tricks).
+ */
+export function safeNextPath(value: string | null | undefined): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u001f]/.test(value)) return null;
+  if (value === "/login" || value.startsWith("/login?") || value.startsWith("/api/")) return null;
+  return value;
+}
+
+/** Login URL used when a session has expired, preserving where the user was. */
+export function expiredLoginUrl(currentPath?: string): string {
+  const params = new URLSearchParams({ expired: "1" });
+  const next = safeNextPath(currentPath);
+  if (next) params.set("next", next);
+  return `/login?${params}`;
+}

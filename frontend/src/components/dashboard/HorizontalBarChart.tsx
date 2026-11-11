@@ -2,22 +2,9 @@
 
 import { memo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, type TooltipContentProps, XAxis, YAxis } from "recharts";
+import { BAR_AXIS_HEIGHT as AXIS_HEIGHT, barChartHeight, type BarRow, niceAxisMax } from "./barLayout";
 import { axisTick, chartTheme, TooltipCard, truncateLabel, useIsCompact, usePrefersReducedMotion } from "./chartTheme";
 
-export interface BarRow {
-  key: string;
-  label: string;
-  value: number;
-  /** Optional secondary line for the tooltip (e.g. specialization, percentage). */
-  detail?: string;
-  /** Text shown at the end of the bar. */
-  valueLabel: string;
-  muted?: boolean;
-}
-
-const ROW_HEIGHT = 34;
-const AXIS_HEIGHT = 28;
-export const barChartHeight = (rows: number) => Math.max(rows, 1) * ROW_HEIGHT + AXIS_HEIGHT;
 
 function BarTooltip({ active, payload, valueName }: TooltipContentProps & { valueName: string }) {
   const row = payload?.[0]?.payload as BarRow | undefined;
@@ -36,7 +23,7 @@ export const HorizontalBarChart = memo(function HorizontalBarChart({ rows, value
     <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 560, height: barChartHeight(rows.length) }}>
       <BarChart data={rows} layout="vertical" margin={{ top: 0, right: compact ? 48 : 64, bottom: 0, left: 0 }} barCategoryGap={8} accessibilityLayer>
         <CartesianGrid horizontal={false} stroke={chartTheme.grid} />
-        <XAxis type="number" allowDecimals={false} domain={[0, (max: number) => Math.max(1, max)]} tick={axisTick} tickLine={false}
+        <XAxis type="number" allowDecimals={false} domain={[0, niceAxisMax]} tick={axisTick} tickLine={false}
           axisLine={{ stroke: chartTheme.axis }} height={AXIS_HEIGHT} />
         <YAxis type="category" dataKey="label" width={labelWidth} tickLine={false} axisLine={false} interval={0}
           tick={{ ...axisTick, fill: chartTheme.label }} tickFormatter={(value: string) => truncateLabel(value, labelLength)} />

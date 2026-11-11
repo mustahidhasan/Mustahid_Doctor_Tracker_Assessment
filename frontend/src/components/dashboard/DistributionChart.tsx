@@ -3,7 +3,8 @@
 import { memo, useMemo } from "react";
 import { type DistributionResponse, formatNumber } from "@/lib/dashboard";
 import { ChartCard, type Scope } from "./ChartCard";
-import { barChartHeight, type BarRow, HorizontalBarChart } from "./HorizontalBarChart";
+import { barChartHeight, type BarRow } from "./barLayout";
+import { LazyHorizontalBarChart as HorizontalBarChart } from "./lazyCharts";
 
 export function toDistributionRows(response: DistributionResponse): BarRow[] {
   return response.data.map((item) => ({

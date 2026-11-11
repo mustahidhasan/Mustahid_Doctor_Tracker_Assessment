@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
+import { useNearViewport } from "./useNearViewport";
 
 export type Scope = "all-time" | "period";
 
@@ -38,6 +39,8 @@ export function ChartCard({ title, description, scope, scopeLabel, summary, stat
   const [showTable, setShowTable] = useState(false);
   const titleId = useId();
   const summaryId = useId();
+  const frame = useRef<HTMLDivElement>(null);
+  const nearViewport = useNearViewport(frame);
 
   return (
     <section aria-labelledby={titleId} aria-busy={status === "loading" || refreshing} className={`flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 ${className}`}>
@@ -57,7 +60,7 @@ export function ChartCard({ title, description, scope, scopeLabel, summary, stat
         )}
       </header>
 
-      <div className={`relative flex-1 transition-opacity ${refreshing ? "opacity-60" : ""}`}>
+      <div ref={frame} className={`relative flex-1 transition-opacity ${refreshing ? "opacity-60" : ""}`}>
         {status === "loading" ? (
           <div role="status" aria-label={`Loading ${title}`} className="animate-pulse" style={{ height }}>
             <div className="flex h-full items-end gap-2 rounded-xl bg-slate-50 p-4">
@@ -94,7 +97,7 @@ export function ChartCard({ title, description, scope, scopeLabel, summary, stat
           </div>
         ) : (
           <figure role="img" aria-label={summary ?? title} aria-describedby={summary ? summaryId : undefined} className="m-0 w-full min-w-0" style={{ height }}>
-            {children}
+            {nearViewport ? children : <div aria-hidden="true" className="h-full w-full rounded-xl bg-slate-50" />}
           </figure>
         )}
       </div>

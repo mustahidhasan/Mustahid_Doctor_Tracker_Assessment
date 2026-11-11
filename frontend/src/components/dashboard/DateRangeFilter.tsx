@@ -72,7 +72,7 @@ export function DateRangeFilter({ value, onChange, resolved, refreshing, onRefre
         <div className="flex items-center justify-between gap-3 text-sm text-slate-500 lg:justify-end">
           <p aria-live="polite">
             {refreshing ? <span className="inline-flex items-center gap-2"><span aria-hidden="true" className="h-3 w-3 animate-spin rounded-full border-2 border-teal-600 border-t-transparent" />Updating…</span>
-              : resolved ? <>Showing <span className="font-medium text-slate-700">{formatRange(resolved)}</span> <span className="text-slate-400">(UTC)</span></> : null}
+              : resolved ? <>Showing <span className="font-medium text-slate-700">{formatRange(resolved)}</span> <span className="text-slate-500">(UTC)</span></> : null}
           </p>
           <button type="button" onClick={onRefresh} disabled={refreshing} aria-label="Refresh dashboard"
             className="rounded-lg border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-200 disabled:opacity-50">

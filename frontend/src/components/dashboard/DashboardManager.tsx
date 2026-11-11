@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/api";
 import {
@@ -68,13 +69,7 @@ export function DashboardManager({ client: injectedClient }: { client?: ReturnTy
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-700">Overview</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Dashboard</h1>
-          <p className="mt-2 max-w-2xl text-slate-600">Live analytics from your doctor and patient records.</p>
-        </div>
-      </header>
+      <PageHeader eyebrow="Overview" title="Dashboard" description="Live analytics from your doctor and patient records." />
 
       <DateRangeFilter value={range} onChange={changeRange} resolved={summaryRange} refreshing={refreshing && Boolean(view)} onRefresh={refresh} />
 

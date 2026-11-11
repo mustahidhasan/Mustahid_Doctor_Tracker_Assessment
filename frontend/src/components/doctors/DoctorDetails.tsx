@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { BreakableEmail } from "@/components/ui/BreakableText";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -10,6 +10,7 @@ import {
   addDoctorPatient, ApiError, deleteDoctor, deleteDoctorPatient, type Doctor, type DoctorInput, type DoctorPatientList,
   errorMessage, formatDate, getDoctor, listDoctorPatients, type Patient, type PatientInput, updateDoctor,
 } from "@/lib/doctors";
+import { Breadcrumbs } from "@/components/layout/PageHeader";
 import { DoctorForm } from "./DoctorForm";
 import { DoctorPatients } from "./DoctorPatients";
 
@@ -99,8 +100,8 @@ export function DoctorDetails({ id }: { id: string }) {
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <BackLink />
-      <section className="my-6 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-800 to-cyan-900 text-white shadow-lg">
+      <BackLink current={doctor.name} />
+      <section className="mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-teal-800 to-cyan-900 text-white shadow-lg">
         <div className="p-6 sm:p-8">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
             <div>
@@ -116,7 +117,7 @@ export function DoctorDetails({ id }: { id: string }) {
           <dl className="mt-7 grid gap-5 border-t border-white/20 pt-6 sm:grid-cols-2 lg:grid-cols-5">
             <Detail label="Hospital" className="lg:col-span-2">{doctor.hospital}</Detail>
             <Detail label="Phone"><a href={`tel:${doctor.phone}`} className="hover:underline">{doctor.phone}</a></Detail>
-            <Detail label="Email" className="lg:col-span-2"><a href={`mailto:${doctor.email}`} className="break-all hover:underline">{doctor.email}</a></Detail>
+            <Detail label="Email" className="lg:col-span-2"><a href={`mailto:${doctor.email}`} className="break-words hover:underline"><BreakableEmail value={doctor.email} /></a></Detail>
             <Detail label="Added">{formatDate(doctor.createdAt)}</Detail>
             <Detail label="Patients">{patientTotal}</Detail>
           </dl>
@@ -142,8 +143,8 @@ export function DoctorDetails({ id }: { id: string }) {
   );
 }
 
-function BackLink() {
-  return <Link href="/doctors" className="inline-flex items-center gap-1 text-sm font-medium text-teal-700 hover:text-teal-900 focus:outline-none focus-visible:underline"><span aria-hidden="true">←</span> Back to doctors</Link>;
+function BackLink({ current = "Doctor" }: { current?: string }) {
+  return <Breadcrumbs items={[{ label: "Doctors", href: "/doctors" }, { label: current }]} />;
 }
 
 function Detail({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {

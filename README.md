@@ -4,7 +4,7 @@ A Next.js administration frontend and Express/MongoDB backend for managing healt
 
 ## Technology stack
 
-- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, and Recharts
+- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS v4 (PostCSS), and Recharts
 - Backend: Node.js, Express 5, TypeScript, Zod, JWT, and bcrypt
 - Database: MongoDB Atlas with Mongoose
 - Deployment: separate frontend and backend Vercel projects
@@ -301,6 +301,84 @@ The browser never downloads collections to count them. Each statistic is a count
 - **Request cache per visit.** Identical requests are shared, so returning to a period you already viewed is instant. Patients per doctor and specializations don't depend on the period, so changing it doesn't refetch them. Failed requests are never cached. **Refresh** clears the cache, and each new visit to the dashboard starts with fresh data.
 - **Changing the period** keeps the last good data on screen with an "Updating…" indicator. If you click through periods quickly, a slow, older response is ignored rather than overwriting your newer selection. Chart data transforms are memoized.
 
+## UI architecture, accessibility, and performance
+
+### Shared UI structure
+
+```text
+frontend/src/components/
+├── layout/   AppSidebar (desktop ≥1024px), AppHeader + MobileNavigation (drawer below 1024px),
+│             NavLinks, UserPanel, PageHeader + Breadcrumbs
+├── ui/       Button, Modal, ConfirmDialog, SelectMenu (pick-from-list), ComboboxInput (type or pick),
+│             Pagination, EmptyState/LoadError,
+│             Toast, BreakableEmail, useFocusTrap
+├── auth/     AuthGuard, LoginForm, LogoutButton, ProtectedShell (the authenticated frame)
+└── doctors/ patients/ dashboard/   feature components built on the pieces above
+```
+
+- **No native browser dropdowns.** Filters use `SelectMenu`. Form fields that suggest existing values but accept new ones (doctor specialization and hospital, patient condition) use `ComboboxInput`, an ARIA combobox with a styled suggestion list.
+- **One button system.** `Button` has `primary`, `secondary`, `danger`, `danger-outline`, `ghost`, and `dark` variants, consistent focus rings, disabled and loading states (`aria-busy`), and defaults to `type="button"`.
+- **Every page** uses `PageHeader` (eyebrow, `h1`, description, action). Details pages use breadcrumbs.
+- **Lists:** cards on phones, tablets, and small desktops, in a 2-column grid from 640px. The full data table appears only from 1280px, where its five columns have room. Long emails wrap after `@` and `.` instead of mid-word.
+
+### Accessibility (WCAG 2.2 AA practices)
+
+- **Skip link and landmarks.** A "Skip to main content" link, a labelled main navigation with `aria-current="page"`, one `h1` per page, and correct heading order. The dashboard statistic cards sit under an `h2`.
+- **Dialogs and the mobile drawer.** Focus moves inside and is trapped (Tab and Shift+Tab wrap), Escape closes, focus returns to the control that opened it, and page scroll is locked. Destructive actions always confirm, and failures are announced inside the dialog.
+- **Forms.**
+  - Visible labels, `aria-invalid`, and errors linked with `aria-describedby`. Focus moves to the first invalid field.
+  - The login form adds a password toggle with `aria-pressed` and a Caps Lock hint.
+  - Custom dropdowns include their visible value in their accessible name.
+- **Keyboard.** The period selector follows the radio-group pattern: arrow keys, Home and End, with only the selected option in the tab order.
+- **Touch targets** are at least 24×24px. Buttons and navigation items are 36–44px.
+- **Color contrast.** Body and secondary text meet 4.5:1. Light gray is used only for decorative icons and placeholders.
+- **Automated checks.** `axe-core` runs in the test suite against the shell, login (including its error state), Doctors, Patients (including an open dialog with errors), and the dashboard. Color contrast is checked in the browser by Lighthouse, because jsdom does not compute styles.
+
+### Sessions
+
+- **Without a session:** a protected page redirects to `/login?next=<page>`.
+- **Already signed in:** opening `/login` redirects to `/dashboard` in the route proxy, so there is no client-side session request and no console 401.
+- **Session expires** (any API `401`): the stale HttpOnly cookie is cleared through `/api/auth/logout`, then the user goes to `/login?expired=1&next=<page>`. Login shows a "session expired" notice and returns to that page.
+- **Safe redirects:** only same-site relative `next` paths are accepted.
+- **Network failure** while checking the session: the user sees a retry screen instead of being signed out.
+
+### Frontend performance
+
+- **Recharts is lazy-loaded and drawn on demand.** It lives in its own chunk (`next/dynamic`), and each chart draws only when it comes within 200px of the viewport. Card headers, summaries, table views, and statistic cards never wait for it.
+- **Lists:** search is debounced (350 ms), and superseded requests are cancelled with `AbortController`, so stale responses can't overwrite newer results. Each mutation refetches only the current page and the filter options.
+- **Dashboard:** a request cache scoped to each visit, and memoized chart transforms.
+
+Measured with Lighthouse 12.6.1 (mobile preset, local production build, same backend and data). The dashboard figures are medians of 3 runs; "Before" is commit `f311e01`.
+
+| Route | Metric | Before | After |
+|---|---|---|---|
+| `/dashboard` | Performance / Accessibility | 96 / 94 | **99 / 100** |
+| `/dashboard` | Total Blocking Time | 87 ms | **51 ms** |
+| `/dashboard` | Largest Contentful Paint | 2.64 s | **1.97 s** |
+| `/dashboard` | JS transferred | 276 KB | **151 KB** |
+| `/dashboard` | Page-specific JS (gzip) | 131.1 KB | **17.1 KB** |
+| `/doctors`, `/patients` | JS transferred | 276 / 283 KB | **163 / 165 KB** |
+| `/doctors`, `/patients` | Accessibility | 96 / 96 | **100 / 100** |
+| `/login` | Best practices (console 401 removed) | 96 | **100** |
+
+### Production CSS fix
+
+`next build --webpack` (the production build) was shipping almost no Tailwind utilities. Tailwind was wired up only through a Turbopack-specific loader, so it worked in `next dev` but not in the webpack build. It now uses the standard `@tailwindcss/postcss` plugin (`frontend/postcss.config.mjs`), which both dev and build use. Production CSS now contains every utility.
+
+### Database query optimization
+
+Every list sort ends with an `_id` tiebreaker so pages are stable, and a single-field sort index cannot serve that sort. `explain()` showed the default Doctors and Patients lists doing a full collection scan plus an in-memory sort on every page load. The sort indexes now include `_id`: `{ createdAt: -1, _id: -1 }` and `{ name: 1, _id: 1 }` on both collections, plus `{ doctorId: 1, createdAt: -1, _id: -1 }` on patients. Each list page now reads only the 10 index entries and 10 documents it returns.
+
+Filters use the `specialization`, `hospital`, `condition`, and `doctorId` indexes. Dashboard period counts use `COUNT_SCAN`, and `distinct(doctorId)` uses `DISTINCT_SCAN`.
+
+Mongoose creates the new indexes automatically and never drops old ones. These Atlas indexes are now redundant and can be removed manually, which does not affect any data:
+
+```js
+// mongosh, connected to the development database
+db.doctors.dropIndexes(["name_1", "createdAt_-1", "email_1"]);
+db.patients.dropIndexes(["name_1", "createdAt_-1", "doctorId_1_createdAt_-1"]);
+```
+
 ## Validation
 
 ```bash
@@ -315,7 +393,7 @@ npm test --prefix frontend
 Tests use mocks and do not connect to or modify MongoDB Atlas.
 
 - Backend (`backend/src/*.test.ts`): authentication; dashboard security (`401` on every endpoint), query validation (period, custom range, limit), UTC range resolution, day, week, and month buckets with zero-filling, date order and boundaries, summary math including the empty database, patients per doctor including doctors with zero patients, specialization and condition distributions, and aggregation failures; patient API security, validation, CRUD, reassignment, nonexistent-doctor rejection, query construction, database-error masking, consistency between doctors and patients, and the patient filters run against the generated seed data; development seed generation, safety guards, and idempotency; plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
-- Frontend (`frontend/src/components/**/*.test.tsx`): login flow; dashboard statistic cards, loading, empty, and error states, per-chart retry, period and custom-range selection, ignored stale responses, the request cache, chart rendering, table views, response transforms, 401 and 403 handling, and small-screen layout; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
+- Frontend (`frontend/src/components/**/*.test.tsx`): app shell, mobile drawer, and focus traps; axe-core page audits; the route proxy, session-expiry redirects, and safe `next` handling; out-of-order list responses, paging back after a deletion, and refresh after reassignment; login flow; dashboard statistic cards, loading, empty, and error states, per-chart retry, period and custom-range selection, ignored stale responses, the request cache, chart rendering, table views, response transforms, 401 and 403 handling, and small-screen layout; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
 
 ### Manually checking doctor management
 
@@ -348,13 +426,13 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 - Specialization and hospital filters are exact and case-sensitive. Values that differ only in case (for example "cardiology" and "Cardiology") appear as separate options.
 - Offset pagination (`skip`) slows down on very deep pages. Cursor pagination would be the next step for large collections.
 - The doctor delete restriction and patient creation each check, then write, without a transaction. A concurrent request between the two steps could still cause a rare inconsistency. Multi-document transactions would close that gap.
-- Filters and page live in component state, not the URL, so a refresh resets them.
 - A doctor's details page lists their newest 100 patients. "View all" opens `/patients` filtered to that doctor.
 - The patient form and doctor filter load up to 1000 doctors. Beyond that, a server-side doctor search endpoint would be needed.
 - Patient search is an unanchored regex across name, condition, and email, with the same scaling caveat as doctor search.
 - Seeded `createdAt` dates are fixed when records are first inserted, because the seed never modifies existing records. As time passes, the 7-day and 30-day dashboard views will gradually empty. Refreshing them would mean deleting the seeded records by their deterministic IDs (only where they haven't been edited) and seeding again. That isn't automated, on purpose, because it deletes data.
 - `run.sh` stops everything with Ctrl+C. If only the `run.sh` process is sent `SIGTERM` from outside a terminal, the dev servers it started can keep running.
-- An `email_1` index left over from an early draft may exist on `doctors` in Atlas. The schema no longer defines it and no query uses it. It is harmless and can be dropped manually.
+- Redundant indexes left over from earlier versions (`email_1` and the old single-field sort indexes) stay in Atlas until dropped manually (see "Database query optimization").
+- Doctor and Patient filters and the current page are kept in component state, not the URL. The exception is the `?doctorId=` link into Patients.
 - Dashboard statistics are recomputed for each request (with a per-visit browser cache). There is no server-side cache or pre-computed counts, which very large datasets would need.
 - No period-over-period comparison is shown, so the dashboard reports no growth percentages.
 - Rounded percentages can add up to slightly more or less than 100% (for example 100.3%).
