@@ -4,7 +4,7 @@ A Next.js administration frontend and Express/MongoDB backend for managing healt
 
 ## Technology stack
 
-- Frontend: Next.js 16, React 19, TypeScript, and Tailwind CSS
+- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, and Recharts
 - Backend: Node.js, Express 5, TypeScript, Zod, JWT, and bcrypt
 - Database: MongoDB Atlas with Mongoose
 - Deployment: separate frontend and backend Vercel projects
@@ -12,8 +12,8 @@ A Next.js administration frontend and Express/MongoDB backend for managing healt
 ## Project structure
 
 ```text
-backend/    Express API, MongoDB models, authentication, doctor management API, seed script, and tests
-frontend/   Next.js application, login UI, protected routes, doctor management UI, and tests
+backend/    Express API, MongoDB models, authentication, doctor, patient and dashboard APIs, seed script, and tests
+frontend/   Next.js application, login UI, protected routes, dashboard, doctor and patient management UI, and tests
 run.sh      Local launcher for both applications
 ```
 
@@ -234,6 +234,73 @@ The script prints how many doctors and patients it inserted and how many were al
 
 The script intentionally has no delete mode. Seeded records are identified exactly by their deterministic IDs, which `seedObjectId("doctor" | "patient", n)` returns for doctors 1–30 and patients 1–150. Don't select seed records by email domain or `doctorId` alone. That could also match records you created manually, such as a patient you added under a seeded doctor. If you remove seeded doctors, first remove or reassign every patient that references them.
 
+## Dashboard and analytics
+
+### Overview
+
+`/dashboard` shows live analytics computed from MongoDB:
+
+- **Six statistic cards:** total doctors, total patients, new patients in the period, average patients per doctor, most common specialization, and most common condition. Each card is labelled **All time** or with the selected period. No growth percentages are shown, because the app has no comparison period to calculate them from.
+- **Patient registrations:** an area chart of new patients per day, week, or month.
+- **Patients per doctor:** a ranked horizontal bar chart of the 10 doctors with the most patients.
+- **Patient conditions** and **Doctor specializations:** ranked horizontal bar charts of share, with the long tail folded into a gray "Other" bar.
+- **Period selector:** Last 7 days, 30 days, 90 days, 12 months, or a custom range. One selector drives every period-based statistic, so all charts always use the same date range. The resolved dates are shown (for example "Oct 13 – Nov 11, 2026 (UTC)").
+- **Every chart** has hover tooltips, a written summary for screen readers, a **Show table** toggle with exact values, a loading skeleton, an empty state, and an error state with **Retry**.
+
+### Analytics API
+
+All endpoints are `GET` requests and require an admin session (`401` otherwise). Invalid parameters return `400` with field details.
+
+| Endpoint | Scope | Parameters | Returns |
+|---|---|---|---|
+| `/api/dashboard/summary` | Mixed (see below) | `period` or `from` + `to` | `{ data: { totalDoctors, totalPatients, newDoctors, newPatients, averagePatientsPerDoctor, topSpecialization, topCondition }, range, scope }` |
+| `/api/dashboard/patient-trends` | Period | `period` or `from` + `to` | `{ data: [{ key, start, end, count }], total, range }` |
+| `/api/dashboard/conditions` | Period | `period` or `from` + `to`, `limit` (1–20, default 8) | `{ data: [{ label, count, percentage }], total, categories, otherCategories, range }` |
+| `/api/dashboard/patients-per-doctor` | All time | `limit` (1–50, default 10) | `{ data: [{ doctorId, name, specialization, patientCount }], meta: { totalDoctors, doctorsWithPatients, doctorsWithoutPatients } }` |
+| `/api/dashboard/specializations` | All time | `limit` (1–20, default 10) | `{ data: [{ label, count, percentage }], total, categories, otherCategories }` |
+
+### Date filtering
+
+- **Periods:** `period` is `7d`, `30d` (the default), `90d`, or `12m`.
+  - 7d, 30d and 90d mean the last N calendar days, including today.
+  - 12m means the current month plus the previous 11.
+- **Custom ranges:** use `from` and `to` (`YYYY-MM-DD`, both inclusive, at most 1830 days). You can't combine them with `period`, and you must provide both.
+- **UTC everywhere.** A range runs from 00:00 UTC on the first day up to, but not including, 00:00 UTC after the last day, so nothing at a day boundary is counted twice or dropped.
+- **Trend granularity:**
+  - Daily for 7d, 30d, and custom ranges up to 31 days.
+  - Weekly for 90d and custom ranges up to 183 days. Weeks start on Monday, and the first and last weeks are cut to the range.
+  - Monthly for 12m and longer custom ranges.
+  - Every period in the range is returned in date order, including ones with zero registrations.
+- **What the period filters.** It applies to the record's own `createdAt`:
+  - `newPatients`, registration trends, and conditions count patients registered in the period.
+  - `newDoctors` counts doctors added in the period.
+- **What the period does not filter.** Total doctors, total patients, average patients per doctor, top specialization, top condition, patients per doctor, and specializations describe current records, so they always cover all time. The **patients per doctor** chart shows each doctor's current caseload, not patients registered in the period.
+
+### How the statistics are calculated
+
+The browser never downloads collections to count them. Each statistic is a count query or a MongoDB aggregation pipeline, and only small chart-ready results are returned (at most about 60 trend periods or 50 rows).
+
+- **Totals and period counts** use `countDocuments`. Period counts use the `createdAt` indexes.
+- **Trends:** `$match` on `createdAt` (indexed), then `$group` by `$dateTrunc` (day, week starting Monday, or month, in UTC). The server fills in missing periods with zero so the browser receives a complete, ordered series.
+- **Patients per doctor:** `$group` patients by `doctorId`, then a single `$lookup` to fetch doctor names and specializations, then sort and limit inside a `$facet` that also counts how many doctors have patients. That makes one round trip with no extra query per doctor. Patients whose doctor no longer exists are skipped. If fewer than `limit` doctors have patients, doctors with zero patients fill the remaining rows.
+- **Specializations and conditions** share one pipeline. Labels are trimmed and grouped case-insensitively for counting only; stored records are never changed. Missing or non-text values count as "Unspecified". A `$facet` returns the top N groups and the totals together, and the server adds an "Other" row so the shares add up to the whole.
+- **Empty data:** averages and percentages fall back to 0 when the total is 0, so an empty database renders empty states rather than errors.
+- **Requirements:** `$dateTrunc` and `$lookup` with both `localField` and `pipeline` need MongoDB 5.0 or later. Atlas currently runs 8.0.
+- **Indexes:** the existing `createdAt`, `{ doctorId: 1, createdAt: -1 }`, `specialization`, and `condition` indexes already support these queries, so none were added. Grouping all patients by doctor or condition reads every patient once. That is fine at this scale; much larger datasets would call for pre-computed counts or Atlas Charts.
+
+### Chart choices
+
+- **Trend:** an area chart, because it shows change over time. The y-axis starts at zero and uses whole numbers, so differences aren't exaggerated.
+- **Patients per doctor, specializations, and conditions:** ranked horizontal bars rather than donuts. With 12 or more specializations and 50 or more conditions, bar length compares far more accurately than slice angle, and long names fit on the axis.
+- **Color:** each chart shows a single series, so one teal carries the data and "Other" is neutral gray rather than an extra category color. Text uses the normal slate text colors. The grid lines are faint solid lines, and the bars have rounded ends.
+- **Small screens:** the cards stack into one column, period buttons use short labels (7D, 30D, …), and long doctor names are shortened. The page never scrolls sideways.
+
+### Frontend data flow
+
+- **Five parallel requests.** The dashboard calls the five relative `/api/dashboard/*` endpoints at once through the same-origin proxy, so the session cookie is included. A 401 redirects to `/login`. If one endpoint fails, only that card shows an error and a Retry button.
+- **Request cache per visit.** Identical requests are shared, so returning to a period you already viewed is instant. Patients per doctor and specializations don't depend on the period, so changing it doesn't refetch them. Failed requests are never cached. **Refresh** clears the cache, and each new visit to the dashboard starts with fresh data.
+- **Changing the period** keeps the last good data on screen with an "Updating…" indicator. If you click through periods quickly, a slow, older response is ignored rather than overwriting your newer selection. Chart data transforms are memoized.
+
 ## Validation
 
 ```bash
@@ -247,8 +314,8 @@ npm test --prefix frontend
 
 Tests use mocks and do not connect to or modify MongoDB Atlas.
 
-- Backend (`backend/src/*.test.ts`): authentication; patient API security, validation, CRUD, reassignment, nonexistent-doctor rejection, query construction, database-error masking, consistency between doctors and patients, and the patient filters run against the generated seed data; development seed generation, safety guards, and idempotency; plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
-- Frontend (`frontend/src/components/**/*.test.tsx`): login flow; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
+- Backend (`backend/src/*.test.ts`): authentication; dashboard security (`401` on every endpoint), query validation (period, custom range, limit), UTC range resolution, day, week, and month buckets with zero-filling, date order and boundaries, summary math including the empty database, patients per doctor including doctors with zero patients, specialization and condition distributions, and aggregation failures; patient API security, validation, CRUD, reassignment, nonexistent-doctor rejection, query construction, database-error masking, consistency between doctors and patients, and the patient filters run against the generated seed data; development seed generation, safety guards, and idempotency; plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
+- Frontend (`frontend/src/components/**/*.test.tsx`): login flow; dashboard statistic cards, loading, empty, and error states, per-chart retry, period and custom-range selection, ignored stale responses, the request cache, chart rendering, table views, response transforms, 401 and 403 handling, and small-screen layout; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
 
 ### Manually checking doctor management
 
@@ -268,6 +335,13 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 4. Edit the patient and change the assigned doctor. Confirm the patient moved from the old doctor's page to the new one.
 5. Delete the patient and confirm it is gone from both pages.
 
+### Manually checking the dashboard
+
+1. Seed the development database if needed (`ALLOW_DEV_SEED=true npm run seed:data --prefix backend`), start `./run.sh`, and open **Dashboard**.
+2. Compare Total doctors and Total patients with the Doctors and Patients pages. Records you added by hand make these higher than 30 and 150.
+3. Switch between 7 days, 30 days, 90 days, and 12 months. "New patients", the trend, and the conditions chart change; the "All time" cards stay the same.
+4. Use **Show table** on any chart to see exact values, then resize the window to phone width.
+
 ## Known limitations
 
 - Search is an unanchored regex across four fields, so it scans documents. This is fine at assessment scale. A larger dataset would call for Atlas Search or a normalized, prefix-indexed search field.
@@ -278,6 +352,12 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 - A doctor's details page lists their newest 100 patients. "View all" opens `/patients` filtered to that doctor.
 - The patient form and doctor filter load up to 1000 doctors. Beyond that, a server-side doctor search endpoint would be needed.
 - Patient search is an unanchored regex across name, condition, and email, with the same scaling caveat as doctor search.
+- Seeded `createdAt` dates are fixed when records are first inserted, because the seed never modifies existing records. As time passes, the 7-day and 30-day dashboard views will gradually empty. Refreshing them would mean deleting the seeded records by their deterministic IDs (only where they haven't been edited) and seeding again. That isn't automated, on purpose, because it deletes data.
+- `run.sh` stops everything with Ctrl+C. If only the `run.sh` process is sent `SIGTERM` from outside a terminal, the dev servers it started can keep running.
+- An `email_1` index left over from an early draft may exist on `doctors` in Atlas. The schema no longer defines it and no query uses it. It is harmless and can be dropped manually.
+- Dashboard statistics are recomputed for each request (with a per-visit browser cache). There is no server-side cache or pre-computed counts, which very large datasets would need.
+- No period-over-period comparison is shown, so the dashboard reports no growth percentages.
+- Rounded percentages can add up to slightly more or less than 100% (for example 100.3%).
 - Patient creation and reassignment check that the doctor exists, then write. A doctor deleted between those two steps could leave a dangling reference, which the UI shows as "Unassigned".
 
 Validate the local launcher with `bash -n run.sh`, then use `./run.sh`. Confirm `http://localhost:5000/health` returns `200` and an unauthenticated request to `http://localhost:5000/api/auth/me` returns `401`.

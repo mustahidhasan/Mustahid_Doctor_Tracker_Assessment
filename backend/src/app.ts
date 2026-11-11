@@ -3,6 +3,7 @@ import cors from "cors";
 import express from "express";
 import { errorHandler, notFound } from "./middleware/security.js";
 import { authRouter } from "./routes/auth.js";
+import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { doctorRouter } from "./routes/doctor.routes.js";
 import { patientRouter } from "./routes/patient.routes.js";
 
@@ -36,5 +37,6 @@ app.get("/health", (_request, response) => {
 app.use("/api/auth", authRouter);
 app.use("/api/doctors", doctorRouter);
 app.use("/api/patients", patientRouter);
+app.use("/api/dashboard", dashboardRouter);
 app.use(notFound);
 app.use(errorHandler);
