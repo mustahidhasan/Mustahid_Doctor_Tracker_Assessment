@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "seed": "tsx src/scripts/seedAdmin.ts",
+    "seed:data": "tsx src/scripts/seedData.ts",
     "test": "vitest run"
   },
   "keywords": [],
