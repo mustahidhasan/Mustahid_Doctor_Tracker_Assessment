@@ -196,15 +196,15 @@ describe("serverless database connection", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
-  it("the Vercel handler answers 503 JSON when the database is unreachable", async () => {
+  it("the Vercel handler answers 503 JSON over a real HTTP response when the database is unreachable (regression)", async () => {
+    // Uses a real Node HTTP server (not a mocked res): the handler runs before Express, so it must not
+    // rely on Express helpers such as res.status()/res.json().
     vi.spyOn(db, "connectDB").mockRejectedValue(new Error("querySrv ENOTFOUND cluster0.secret.mongodb.net"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const status = vi.fn().mockReturnThis();
-    const json = vi.fn();
-    const setHeader = vi.fn();
-    await handler({} as never, { status, json, setHeader } as never);
-    expect(status).toHaveBeenCalledWith(503);
-    expect(json).toHaveBeenCalledWith({ error: "Service temporarily unavailable" });
+    const response = await request(handler as never).get("/api/doctors").expect(503);
+    expect(response.body).toEqual({ error: "Service temporarily unavailable" });
+    expect(response.headers["content-type"]).toMatch(/application\/json/);
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret.mongodb.net");
   });
 
@@ -212,6 +212,14 @@ describe("serverless database connection", () => {
     vi.spyOn(db, "connectDB").mockResolvedValue();
     vi.spyOn(Doctor, "countDocuments");
     const response = await request(handler as never).get("/health").expect(200);
-    expect(response.body).toEqual({ status: "ok", service: "doctor-tracker-backend" });
+    expect(response.body).toEqual({ status: "ok", service: "doctor-tracker-backend", environment: "local" });
+  });
+
+  it("reports the deployment environment at /health and /api/health (for proxy checks)", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    for (const path of ["/health", "/api/health"]) {
+      const response = await request(app).get(path).expect(200);
+      expect(response.body).toEqual({ status: "ok", service: "doctor-tracker-backend", environment: "preview" });
+    }
   });
 });

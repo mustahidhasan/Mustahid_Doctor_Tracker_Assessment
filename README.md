@@ -1,69 +1,47 @@
 # Doctor Tracker
 
-Admin app for managing doctors, their patients, and a live analytics dashboard.
-
-- **Frontend:** Next.js 16, TypeScript, Tailwind CSS (`frontend/`)
-- **Backend:** Express, TypeScript, MongoDB Atlas via Mongoose (`backend/`)
-- **Auth:** JWT in an HttpOnly cookie. The browser only talks to Next.js, which proxies `/api/*` to Express.
-
-## Prerequisites
-
-- Node.js 20+ and npm
-- A MongoDB Atlas cluster with a **development** database, and your IP on the Atlas network access list
+Next.js frontend (`frontend/`) and Express + MongoDB backend (`backend/`). Requires Node.js 22.
 
 ## Setup
 
-1. **Create the env files** from the templates:
+```bash
+cp backend/.env.example backend/.env          # set MONGODB_URI, JWT_SECRET (32+ chars), ADMIN_EMAIL, ADMIN_PASSWORD
+cp frontend/.env.example frontend/.env.local
+npm install --prefix backend && npm install --prefix frontend
+npm run seed --prefix backend                  # create the admin account
+ALLOW_DEV_SEED=true npm run seed:data --prefix backend   # optional sample data
+```
+
+## Run
+
+```bash
+./run.sh            # http://localhost:3000, Ctrl+C to stop
+```
+
+## Test
+
+```bash
+npm test --prefix backend && npm test --prefix frontend
+```
+
+## Deploy (Vercel)
+
+One-time setup:
+1. Create two Vercel projects from this repo: `doctor-tracker-api` (Root Directory `backend`) and `doctor-tracker-web` (Root Directory `frontend`).
+2. Set the environment variables in Vercel:
+   - api project: `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CORS_ORIGIN` (the frontend URL)
+   - web project: `API_PROXY_TARGET` (the backend URL)
+3. Link the folders, then create the production admin:
 
    ```bash
-   cp backend/.env.example backend/.env
-   cp frontend/.env.example frontend/.env.local
+   npm install -g vercel && vercel login
+   vercel link --cwd backend --project doctor-tracker-api
+   vercel link --cwd frontend --project doctor-tracker-web
+   ./deploy.sh seed-admin
    ```
 
-2. **Fill in `backend/.env`:**
+Deploy:
 
-   | Variable | Value |
-   |---|---|
-   | `MONGODB_URI` | Your Atlas connection string, pointing at a dev database (e.g. `.../doctor_tracker_dev`) |
-   | `JWT_SECRET` | A random string of 32+ characters (e.g. `openssl rand -base64 48`) |
-   | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Your login. The password needs 12+ characters. |
-
-   Keep the defaults for everything else. `frontend/.env.local` already points to `http://localhost:5000`.
-
-3. **Install dependencies and create the admin account:**
-
-   ```bash
-   npm install --prefix backend && npm install --prefix frontend
-   npm run seed --prefix backend
-   ```
-
-4. **Optional: load sample data** (30 doctors, 150 patients, safe to re-run):
-
-   ```bash
-   ALLOW_DEV_SEED=true npm run seed:data --prefix backend
-   ```
-
-5. **Run the app:**
-
-   ```bash
-   ./run.sh
-   ```
-
-   Open http://localhost:3000 and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Press Ctrl+C to stop both servers.
-
-## Common commands
-
-| Task | Command |
-|---|---|
-| Backend tests / types / build | `npm test --prefix backend` · `npm run typecheck --prefix backend` · `npm run build --prefix backend` |
-| Frontend tests / lint / build | `npm test --prefix frontend` · `npm run lint --prefix frontend` · `npm run build --prefix frontend` |
-| End-to-end test (needs the app running) | `npm install --prefix e2e`, then `E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... npm test --prefix e2e` |
-| Run the services separately | `npm run dev --prefix backend` and `npm run dev --prefix frontend` |
-
-Unit tests are mocked and never touch the database.
-
-## Troubleshooting
-
-- **"port already in use":** stop whatever is running on 3000 or 5000, or run `BACKEND_PORT=5001 FRONTEND_PORT=3001 ./run.sh` and set `API_PROXY_TARGET` to match.
-- **MongoDB timeout:** check the URI, the database user's permissions, and the Atlas IP access list.
-- **Login rejected:** run `npm run seed --prefix backend`, and check that `ADMIN_EMAIL` is the address you're typing.
+```bash
+./deploy.sh preview      # or: ./deploy.sh production
+```

@@ -161,3 +161,11 @@ vite.config.ts.timestamp-*
 # Playwright end-to-end artifacts
 e2e/test-results/
 e2e/playwright-report/
+
+# Vercel project links and build output (per-directory links live in backend/.vercel and frontend/.vercel)
+.vercel
+**/.vercel/
+
+# Local test session cookies
+*.cookie
+cookie*.txt

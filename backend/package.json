@@ -13,6 +13,9 @@
     "seed:data": "tsx src/scripts/seedData.ts",
     "test": "vitest run"
   },
+  "engines": {
+    "node": "22.x"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

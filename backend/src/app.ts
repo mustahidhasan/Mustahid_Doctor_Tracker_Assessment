@@ -28,10 +28,16 @@ app.get("/", (_request, response) => {
   });
 });
 
-app.get("/health", (_request, response) => {
+/**
+ * Health check, also reachable at /api/health so it can be requested through the frontend's /api
+ * proxy. `environment` (production / preview / local) lets deployment checks confirm that a
+ * frontend is talking to the backend of the same environment.
+ */
+app.get(["/health", "/api/health"], (_request, response) => {
   response.status(200).json({
     status: "ok",
     service: "doctor-tracker-backend",
+    environment: process.env.VERCEL_ENV || "local",
   });
 });
 
