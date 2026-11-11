@@ -1,0 +1,11 @@
+{
+  "name": "doctor-tracker-e2e",
+  "private": true,
+  "description": "End-to-end browser tests (Playwright, uses the locally installed Google Chrome).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1"
+  }
+}

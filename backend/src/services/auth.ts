@@ -30,6 +30,13 @@ export function signSession(userId: string): string {
   return jwt.sign({ role: "admin" }, jwtSecret(), { algorithm: "HS256", expiresIn, subject: userId });
 }
 
+/** Remaining lifetime of a signed token in milliseconds (used to align the cookie's Max-Age). */
+export function sessionMaxAgeMs(token: string, now = Date.now()): number | undefined {
+  const decoded = jwt.decode(token);
+  const exp = decoded && typeof decoded === "object" ? decoded.exp : undefined;
+  return typeof exp === "number" ? Math.max(0, exp * 1000 - now) : undefined;
+}
+
 export function verifySession(token: string): { userId: string; role: "admin" } {
   const decoded = jwt.verify(token, jwtSecret(), { algorithms: ["HS256"] });
   const payload = tokenPayloadSchema.parse(decoded);

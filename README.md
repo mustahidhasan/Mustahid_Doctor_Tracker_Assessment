@@ -21,7 +21,15 @@ run.sh      Local launcher for both applications
 
 The browser calls relative `/api/*` URLs. Next.js rewrites those requests to Express using `API_PROXY_TARGET`, so the JWT remains in a same-origin, `HttpOnly`, `SameSite=Lax` cookie. The backend validates the HS256 signature, expiration, payload, and active admin account on every authenticated request. Passwords are hashed with bcrypt (12 rounds) and `passwordHash` is excluded from normal MongoDB queries.
 
-Login and logout requests reject untrusted browser origins. Login is limited to 10 failed attempts per 15 minutes and requests are limited to 16 KB. The included rate limiter is an in-memory local safeguard; Vercel instances do not share its state. For stronger production enforcement, add a shared Redis/KV-backed limiter at the platform edge.
+Login, logout, and every state-changing API request reject untrusted browser origins (CSRF defence in depth on top of `SameSite=Lax`). Request bodies are limited to 16 KB, and larger ones return `413`.
+
+**Login rate limiting has two layers**, and both count only failed attempts:
+- **Per account:** 10 per 15 minutes, keyed by the normalized email. This is the brute-force control. It can't be bypassed by rotating `X-Forwarded-For`, which a client can send through the Next.js proxy.
+- **Per client IP:** 50 per 15 minutes, a looser brake on credential stuffing across many accounts.
+
+Both limiters are in memory per instance, and Vercel instances don't share them. A shared Redis or KV store is needed for global enforcement.
+
+The session cookie's `Max-Age` matches the JWT's actual expiry (`JWT_EXPIRES_IN`).
 
 Logout removes the browser cookie but does not revoke a JWT that was already issued. Account lookup on every authenticated request ensures deleted or unauthorized accounts are rejected. Immediate token revocation would require a server-side denylist or session store.
 
@@ -44,7 +52,14 @@ Logout removes the browser cookie but does not revoke a JWT that was already iss
    ./run.sh
    ```
 
-   The runner validates required configuration without printing values, installs missing dependencies, starts ports 3000 and 5000, and stops both process trees on Ctrl+C or an unexpected application exit. To run services separately, use `npm run dev --prefix backend` and `npm run dev --prefix frontend`.
+   What the runner does:
+   - **Checks configuration** without printing any values: required variables, and a `JWT_SECRET` of at least 32 characters.
+   - **Refuses a production configuration:** `NODE_ENV=production`, or a database name containing "prod". Override with `ALLOW_PRODUCTION_DATABASE=true` only deliberately. It prints the database *name*, never the connection string.
+   - **Checks the ports** and fails with a clear message if 5000 or 3000 is taken. Set `BACKEND_PORT` and `FRONTEND_PORT` to change them.
+   - **Installs missing dependencies**, then starts each service in its own process group.
+   - **Stops cleanly.** Ctrl+C (exit 130), `SIGTERM` (exit 143), or either service exiting stops both whole process trees; anything still running after 5 seconds is force-stopped.
+
+   It works with bash 3.2 or later on macOS and Linux, and doesn't need Docker. To run the services separately, use `npm run dev --prefix backend` and `npm run dev --prefix frontend`.
 
 6. Visit `http://localhost:3000/login`.
 
@@ -54,9 +69,11 @@ Backend: `NODE_ENV`, `PORT`, `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `COR
 
 Frontend: `API_PROXY_TARGET` (defaults locally to `http://localhost:5000`). On Vercel, set it to the separately deployed backend URL and set backend `CORS_ORIGIN` to the frontend origin. Production cookies automatically use `Secure`.
 
+End-to-end tests (optional, local only): `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD`, `E2E_BASE_URL`.
+
 ## MongoDB
 
-The backend reads `MONGODB_URI` and connects through `backend/src/config/db.ts`. Local startup fails safely when the URI is missing or Atlas is unavailable. The seed command uses the same connection, creates only a missing administrator, and always closes its connection. Add the current machine or deployment egress address to the Atlas network access list as needed.
+The backend reads `MONGODB_URI` and connects through `backend/src/config/db.ts`. The connection is opened once and reused. In serverless functions, a warm instance skips the handshake, concurrent cold-start requests share one attempt, a failed attempt is retried on the next request, and a closed connection is re-established. If Atlas is unreachable, the Vercel handler returns `503 {"error":"Service temporarily unavailable"}` without exposing details. Local startup fails safely when the URI is missing or Atlas is unavailable. The seed command uses the same connection, creates only a missing administrator, and always closes its connection. Add the current machine or deployment egress address to the Atlas network access list as needed.
 
 ## Authentication API
 
@@ -382,15 +399,30 @@ db.patients.dropIndexes(["name_1", "createdAt_-1", "doctorId_1_createdAt_-1"]);
 ## Validation
 
 ```bash
-npm run typecheck --prefix backend
+npm run typecheck --prefix backend   # also type-checks the Vercel entry (backend/api) via tsconfig.api.json
 npm run build --prefix backend
 npm test --prefix backend
 npm run lint --prefix frontend
+npx --prefix frontend tsc --noEmit -p frontend
 npm run build --prefix frontend
 npm test --prefix frontend
+bash -n run.sh
 ```
 
-Tests use mocks and do not connect to or modify MongoDB Atlas.
+Unit and integration tests use mocks and never connect to or modify MongoDB Atlas.
+
+### End-to-end tests (Playwright)
+
+`e2e/` contains a browser workflow test that uses your installed Google Chrome, so no browser download is needed. It walks through the whole admin workflow in a real browser: log in, dashboard, create two doctors, search, open details, add a patient, search on the Patients page, edit and reassign the patient, verify the new relationship, delete the patient and both doctors, log out, and confirm protected pages and APIs are no longer reachable.
+
+It creates only records tagged `[E2E <run id>]` and deletes them, including in a cleanup step if any step fails. Seed and manually created records are never touched. Run it against a running app connected to a **development** database:
+
+```bash
+npm install --prefix e2e
+E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... E2E_BASE_URL=http://localhost:3000 npm test --prefix e2e
+```
+
+Without the two credential variables, the test is skipped.
 
 - Backend (`backend/src/*.test.ts`): authentication; dashboard security (`401` on every endpoint), query validation (period, custom range, limit), UTC range resolution, day, week, and month buckets with zero-filling, date order and boundaries, summary math including the empty database, patients per doctor including doctors with zero patients, specialization and condition distributions, and aggregation failures; patient API security, validation, CRUD, reassignment, nonexistent-doctor rejection, query construction, database-error masking, consistency between doctors and patients, and the patient filters run against the generated seed data; development seed generation, safety guards, and idempotency; plus doctor API security (`401` on every endpoint, untrusted-origin `403`, no leaked database errors), validation, CRUD, query construction (escaped search, exact filters, UTC date range, sort, pagination math), patient association, cross-doctor delete protection, and the restrict-on-delete policy.
 - Frontend (`frontend/src/components/**/*.test.tsx`): app shell, mobile drawer, and focus traps; axe-core page audits; the route proxy, session-expiry redirects, and safe `next` handling; out-of-order list responses, paging back after a deletion, and refresh after reassignment; login flow; dashboard statistic cards, loading, empty, and error states, per-chart retry, period and custom-range selection, ignored stale responses, the request cache, chart rendering, table views, response transforms, 401 and 403 handling, and small-screen layout; patient list, search, filters (including searching the doctor list), pagination, create and edit forms, doctor selection and reassignment, delete confirmation, details page, and loading, empty, and error states; the custom dropdown component; plus doctor list rendering, loading, empty, and error states, debounced search, filters, invalid date range, pagination, form validation, create and edit, prevention of duplicate submissions, delete confirmation and conflicts, and details page patient add and remove.
@@ -430,13 +462,16 @@ Use a development database (for example `doctor_tracker_dev`), never production.
 - The patient form and doctor filter load up to 1000 doctors. Beyond that, a server-side doctor search endpoint would be needed.
 - Patient search is an unanchored regex across name, condition, and email, with the same scaling caveat as doctor search.
 - Seeded `createdAt` dates are fixed when records are first inserted, because the seed never modifies existing records. As time passes, the 7-day and 30-day dashboard views will gradually empty. Refreshing them would mean deleting the seeded records by their deterministic IDs (only where they haven't been edited) and seeding again. That isn't automated, on purpose, because it deletes data.
-- `run.sh` stops everything with Ctrl+C. If only the `run.sh` process is sent `SIGTERM` from outside a terminal, the dev servers it started can keep running.
 - Redundant indexes left over from earlier versions (`email_1` and the old single-field sort indexes) stay in Atlas until dropped manually (see "Database query optimization").
 - Doctor and Patient filters and the current page are kept in component state, not the URL. The exception is the `?doctorId=` link into Patients.
 - Dashboard statistics are recomputed for each request (with a per-visit browser cache). There is no server-side cache or pre-computed counts, which very large datasets would need.
 - No period-over-period comparison is shown, so the dashboard reports no growth percentages.
 - Rounded percentages can add up to slightly more or less than 100% (for example 100.3%).
 - Patient creation and reassignment check that the doctor exists, then write. A doctor deleted between those two steps could leave a dangling reference, which the UI shows as "Unassigned".
+- Login rate limits and the absence of JWT revocation are per-instance and in-memory (see "Authentication architecture").
+- The Content-Security-Policy covers framing, `base-uri`, `form-action`, and `object-src`. A full `script-src` policy would need per-request nonces for Next.js inline scripts.
+- API responses are `Cache-Control: no-store`, and `/patients` is rendered per request. Pages showing patient data therefore don't enter the browser's back/forward cache, which is deliberate for health data.
+- Development-only tooling (ESLint's `minimatch`) has a moderate `npm audit` advisory whose only fix is a breaking `--force` upgrade. It is not part of any production bundle; `npm audit --omit=dev` reports 0 vulnerabilities.
 
 Validate the local launcher with `bash -n run.sh`, then use `./run.sh`. Confirm `http://localhost:5000/health` returns `200` and an unauthenticated request to `http://localhost:5000/api/auth/me` returns `401`.
 
@@ -444,10 +479,27 @@ Validate the local launcher with `bash -n run.sh`, then use `./run.sh`. Confirm 
 
 - Missing environment error: create the local files from their `.env.example` templates and fill every required value.
 - MongoDB timeout: confirm the Atlas URI, database user permissions, and network access list.
-- Port already in use: stop the process using port 3000 or 5000 before launching.
+- Port already in use: `run.sh` names the busy port. Stop that process, or run `BACKEND_PORT=5001 FRONTEND_PORT=3001 ./run.sh` (and point `API_PROXY_TARGET` at the new backend port).
 - Login rejected: run the seed command and confirm `ADMIN_EMAIL` matches the normalized account email.
 - Cookie absent in production: confirm both projects use HTTPS, `API_PROXY_TARGET` points to the backend, and `CORS_ORIGIN` matches the frontend origin.
 
 ## Production architecture
 
-The browser talks only to the Next.js origin. Next.js rewrites `/api/*` to the separate Express Vercel deployment, preserving the session cookie response. The backend Vercel handler connects to Atlas before serving API requests. Configure all production secrets in Vercel project settings; do not upload local environment files. A shared external rate-limit store is recommended for distributed production enforcement.
+The browser talks only to the Next.js origin. Next.js rewrites `/api/*` to the separate Express Vercel deployment, so the session cookie is set on, and sent to, the frontend origin only. The backend Vercel handler (`backend/api/index.ts`) reuses a cached Atlas connection before handing each request to Express. Configure all production secrets in Vercel project settings; never upload local environment files. A shared external rate-limit store is recommended for distributed production enforcement.
+
+### Production deployment prerequisites (for Module 9; not yet verified on Vercel)
+
+- **Two Vercel projects** from this repository: root directory `backend` (Express as a Vercel Function via `api/index.ts` and `vercel.json`), and root directory `frontend` (Next.js; build command `npm run build`).
+- **Backend environment:**
+  - `NODE_ENV=production` (makes the cookie `Secure`).
+  - `MONGODB_URI` (production database, backend only).
+  - `JWT_SECRET` (a new random value of at least 32 characters, different from local).
+  - `JWT_EXPIRES_IN`.
+  - `CORS_ORIGIN` (the frontend's production origin).
+  - `ADMIN_EMAIL` and `ADMIN_PASSWORD`, needed only when running the admin seed.
+  - Never set `ALLOW_DEV_SEED` in production.
+- **Frontend environment:** `API_PROXY_TARGET`, the backend's production URL.
+- **MongoDB Atlas network access** must allow Vercel's egress. Vercel Functions have no fixed IPs on standard plans, so this usually means `0.0.0.0/0` with a strong database password and a least-privilege database user, or Vercel's static-IP option.
+- **Seed the production admin once:** run `npm run seed --prefix backend` with the production variables from a trusted machine. Don't run the development data seed against production.
+- **Nothing depends on local state:** authentication is a stateless JWT cookie with no session store, and nothing is written to the local filesystem.
+- **To verify after deploying:** that the cookie arrives through the frontend proxy, that `X-Forwarded-For` reaches the backend as expected, and the security headers and CORS from the deployed origins.

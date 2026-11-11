@@ -1,7 +1,7 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import { errorHandler, notFound } from "./middleware/security.js";
+import { errorHandler, notFound, securityHeaders } from "./middleware/security.js";
 import { authRouter } from "./routes/auth.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { doctorRouter } from "./routes/doctor.routes.js";
@@ -10,6 +10,7 @@ import { patientRouter } from "./routes/patient.routes.js";
 export const app = express();
 
 app.disable("x-powered-by");
+app.use(securityHeaders);
 app.set("trust proxy", 1);
 app.use(
   cors({

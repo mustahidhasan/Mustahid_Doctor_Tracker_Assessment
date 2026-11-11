@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { clearSessionCookieOptions, sessionCookieOptions } from "../config/cookies.js";
 import { User } from "../models/User.js";
-import { normalizeEmail, SESSION_COOKIE, signSession, verifyPassword } from "../services/auth.js";
+import { normalizeEmail, SESSION_COOKIE, sessionMaxAgeMs, signSession, verifyPassword } from "../services/auth.js";
 
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -19,7 +19,8 @@ export async function login(request: Request, response: Response) {
   const valid = user?.role === "admin" && await verifyPassword(result.data.password, user.passwordHash);
   if (!valid || !user) return response.status(401).json({ error: "Invalid email or password" });
 
-  response.cookie(SESSION_COOKIE, signSession(String(user._id)), sessionCookieOptions());
+  const token = signSession(String(user._id));
+  response.cookie(SESSION_COOKIE, token, sessionCookieOptions(sessionMaxAgeMs(token)));
   return response.status(200).json({
     user: { id: String(user._id), name: user.name, email: user.email, role: user.role },
   });
