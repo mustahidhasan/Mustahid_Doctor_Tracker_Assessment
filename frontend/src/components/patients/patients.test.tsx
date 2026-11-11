@@ -45,7 +45,7 @@ const renderList = async (props: { initialDoctorId?: string } = {}) => {
   await waitFor(() => expect(api.getPatientFilterOptions).toHaveBeenCalled());
 };
 const choose = async (menu: string, option: string | RegExp, scope: ReturnType<typeof within> | typeof screen = screen) => {
-  fireEvent.click(scope.getByRole("button", { name: menu }));
+  fireEvent.click(scope.getByRole("button", { name: new RegExp(`^${menu}:`) }));
   fireEvent.click(await within(screen.getByRole("listbox", { name: menu })).findByRole("option", { name: option }));
 };
 
@@ -81,7 +81,7 @@ describe("PatientsManager list", () => {
 
   it("searches inside the doctor filter", async () => {
     await renderList();
-    fireEvent.click(screen.getByRole("button", { name: "Filter doctor" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Filter doctor:/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "Filter doctor search" }), { target: { value: "neuro" } });
     const options = within(screen.getByRole("listbox", { name: "Filter doctor" })).getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual(["Dr. Bea · Neurology"]);
@@ -90,7 +90,7 @@ describe("PatientsManager list", () => {
   it("pre-filters by doctor from the URL", async () => {
     await renderList({ initialDoctorId: DOCTOR_A });
     expect(api.listPatients).toHaveBeenCalledWith(expect.objectContaining({ doctorId: DOCTOR_A }), expect.any(AbortSignal));
-    expect(screen.getByRole("button", { name: "Filter doctor" })).toHaveTextContent("Dr. Ada");
+    expect(screen.getByRole("button", { name: /^Filter doctor:/ })).toHaveTextContent("Dr. Ada");
   });
 
   it("ignores an invalid doctor ID from the URL", async () => {
@@ -163,7 +163,7 @@ describe("PatientsManager create, edit, delete", () => {
     fireEvent.click(screen.getByRole("button", { name: /Add patient/ }));
     const dialog = within(screen.getByRole("dialog"));
     fill({ Name: "  New Patient ", Condition: "Asthma" });
-    fireEvent.click(dialog.getByRole("button", { name: "Assigned doctor" }));
+    fireEvent.click(dialog.getByRole("button", { name: /^Assigned doctor:/ }));
     fireEvent.change(screen.getByRole("combobox", { name: "Assigned doctor search" }), { target: { value: "bea" } });
     fireEvent.click(screen.getByRole("option", { name: /Dr\. Bea/ }));
     fireEvent.click(dialog.getByRole("button", { name: "Add patient" }));
@@ -205,7 +205,7 @@ describe("PatientsManager create, edit, delete", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Edit Pat Lee" })[0]!);
     const dialog = within(screen.getByRole("dialog", { name: "Edit patient" }));
     expect(dialog.getByLabelText("Condition", { exact: false })).toHaveValue("Hypertension");
-    expect(dialog.getByRole("button", { name: "Assigned doctor" })).toHaveTextContent("Dr. Ada");
+    expect(dialog.getByRole("button", { name: /^Assigned doctor:/ })).toHaveTextContent("Dr. Ada");
     await choose("Assigned doctor", /Dr\. Bea/, dialog);
     fill({ Email: "" });
     fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
@@ -285,5 +285,40 @@ describe("patient form validation", () => {
       phone: expect.any(String), email: "Enter a valid email address",
     });
     expect(api.validatePatientForm({ name: "A", condition: "B", doctorId: "123", phone: "", email: "" }).doctorId).toBe("Select a valid doctor");
+  });
+});
+
+describe("PatientsManager edge cases", () => {
+  it("ignores an older, slower search response that arrives after a newer one", async () => {
+    let releaseSlow!: (value: api.PatientList) => void;
+    vi.mocked(api.listPatients).mockImplementation((query, signal) => {
+      if (query.search === "pa") return new Promise((resolve, reject) => { releaseSlow = resolve; signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))); });
+      if (query.search === "newer") return Promise.resolve({ data: [{ ...patient, _id: "p2", name: "Newer Patient" }], pagination });
+      return Promise.resolve({ data: [patient], pagination });
+    });
+    await renderList();
+    fireEvent.change(screen.getByLabelText("Search patients"), { target: { value: "pa" } });
+    await waitFor(() => expect(lastQuery()).toMatchObject({ search: "pa" }), { timeout: 1500 });
+    fireEvent.change(screen.getByLabelText("Search patients"), { target: { value: "newer" } });
+    expect((await screen.findAllByText("Newer Patient", {}, { timeout: 1500 })).length).toBeGreaterThan(0);
+    await act(async () => releaseSlow({ data: [{ ...patient, name: "Stale Patient" }], pagination }));
+    expect(screen.queryByText("Stale Patient")).not.toBeInTheDocument();
+  });
+
+  it("refreshes the list and filter options after reassigning a patient", async () => {
+    vi.mocked(api.listPatients)
+      .mockResolvedValueOnce({ data: [patient], pagination })
+      .mockResolvedValue({ data: [{ ...patient, doctorId: DOCTOR_B, doctor: { _id: DOCTOR_B, name: "Dr. Bea", specialization: "Neurology", hospital: "North" } }], pagination });
+    await renderList();
+    const optionCalls = vi.mocked(api.getPatientFilterOptions).mock.calls.length;
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit Pat Lee" })[0]!);
+    const dialog = within(screen.getByRole("dialog"));
+    await choose("Assigned doctor", /Dr\. Bea/, dialog);
+    fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(api.updatePatient).toHaveBeenCalledWith(PATIENT, expect.objectContaining({ doctorId: DOCTOR_B })));
+    // The row now shows the new doctor, without a manual reload.
+    expect((await screen.findAllByRole("link", { name: "Dr. Bea" }))[0]).toHaveAttribute("href", `/doctors/${DOCTOR_B}`);
+    expect(screen.queryByRole("link", { name: "Dr. Ada" })).not.toBeInTheDocument();
+    expect(vi.mocked(api.getPatientFilterOptions).mock.calls.length).toBeGreaterThan(optionCalls);
   });
 });

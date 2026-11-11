@@ -45,14 +45,17 @@ const doctorSchema = new Schema<IDoctor>(
   { timestamps: true },
 );
 
-// Indexes for filtering and sorting. Exact-match filters (specialization,
-// hospital), distinct() lookups for filter options, name sort, and created-date
-// sort/range all use these. Email is searched only via substring regex, which
-// cannot use a B-tree index, so no email index is created.
-doctorSchema.index({ name: 1 });
+// Indexes. Every list sort uses `_id` as a tiebreaker for stable pagination, so the sort indexes
+// include `_id`; otherwise MongoDB scans the whole collection and sorts in memory on every page.
+// - { createdAt: -1, _id: -1 }: default "newest" sort (walked backwards for "oldest"), created-date
+//   ranges, and dashboard period counts.
+// - { name: 1, _id: 1 }: name sort.
+// - specialization / hospital: exact-match filters and distinct() for the filter options.
+// Email is only searched by substring regex, which a B-tree index cannot serve, so it has no index.
+doctorSchema.index({ createdAt: -1, _id: -1 });
+doctorSchema.index({ name: 1, _id: 1 });
 doctorSchema.index({ specialization: 1 });
 doctorSchema.index({ hospital: 1 });
-doctorSchema.index({ createdAt: -1 });
 
 export type DoctorDocument = HydratedDocument<IDoctor>;
 export const Doctor = (models.Doctor as Model<IDoctor> | undefined) ?? model<IDoctor>("Doctor", doctorSchema);

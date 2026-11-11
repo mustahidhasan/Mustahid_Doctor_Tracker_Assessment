@@ -1,9 +1,14 @@
 import mongoose, { Types } from "mongoose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  assertSeedAllowed, generateSeedData, main, resolveReferenceDate, SEED_DOCTOR_COUNT, SEED_PATIENT_COUNT,
+  assertSeedAllowed, generateSeedData, main, mongooseSeedRepository, resolveReferenceDate, SEED_DOCTOR_COUNT, SEED_PATIENT_COUNT,
   seedDevelopmentData, type SeedDoctor, type SeedPatient, type SeedRepository, validateSeedData,
 } from "./scripts/seedData.js";
+import { Doctor } from "./models/Doctor.js";
+import { Patient } from "./models/Patient.js";
+import { User } from "./models/User.js";
+import { buildBuckets, truncateDate } from "./services/dashboard.service.js";
+import { resolveRange } from "./validators/dashboard.validator.js";
 import { doctorInputSchema, patientInputSchema } from "./validators/doctor.validator.js";
 
 // No test here connects to MongoDB: an in-memory repository mirrors the insert-only semantics.
@@ -199,5 +204,74 @@ describe("seeding", () => {
     repository.existingDoctorIds = async () => [];
     await expect(seedDevelopmentData(repository, data)).rejects.toThrow(/no patients were written/);
     expect(patients.size).toBe(0);
+  });
+});
+
+describe("real MongoDB write path (mocked driver)", () => {
+  it("writes insert-only upserts keyed by _id: never $set, never delete, never touches users", async () => {
+    const data = generateSeedData(REFERENCE);
+    const doctorWrite = vi.spyOn(Doctor.collection, "bulkWrite").mockResolvedValue({ upsertedCount: 30 } as never);
+    const patientWrite = vi.spyOn(Patient.collection, "bulkWrite").mockResolvedValue({ upsertedCount: 150 } as never);
+    vi.spyOn(Doctor, "find").mockReturnValue({ select: () => ({ lean: async () => data.doctors.map((doctor) => ({ _id: doctor._id })) }) } as never);
+    const forbidden = [
+      vi.spyOn(Doctor, "deleteMany"), vi.spyOn(Doctor, "updateMany"), vi.spyOn(Doctor, "replaceOne"),
+      vi.spyOn(Patient, "deleteMany"), vi.spyOn(Patient, "updateMany"), vi.spyOn(Patient, "replaceOne"),
+      vi.spyOn(User, "updateOne"), vi.spyOn(User, "updateMany"), vi.spyOn(User, "deleteMany"), vi.spyOn(User, "create"), vi.spyOn(User.collection, "bulkWrite"),
+    ];
+
+    const result = await seedDevelopmentData(mongooseSeedRepository, data);
+
+    expect(result).toEqual({ doctorsInserted: 30, doctorsSkipped: 0, patientsInserted: 150, patientsSkipped: 0 });
+    for (const [spy, records] of [[doctorWrite, data.doctors], [patientWrite, data.patients]] as const) {
+      const operations = spy.mock.calls[0]![0] as Array<{ updateOne: { filter: object; update: Record<string, unknown>; upsert: boolean } }>;
+      expect(operations).toHaveLength(records.length);
+      operations.forEach((operation, index) => {
+        expect(Object.keys(operation)).toEqual(["updateOne"]);
+        expect(operation.updateOne.filter).toEqual({ _id: records[index]!._id });
+        expect(Object.keys(operation.updateOne.update)).toEqual(["$setOnInsert"]);
+        expect(operation.updateOne.upsert).toBe(true);
+      });
+    }
+    for (const spy of forbidden) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("reports existing records as skipped when MongoDB inserts nothing", async () => {
+    const data = generateSeedData(REFERENCE);
+    vi.spyOn(Doctor.collection, "bulkWrite").mockResolvedValue({ upsertedCount: 0 } as never);
+    vi.spyOn(Patient.collection, "bulkWrite").mockResolvedValue({ upsertedCount: 0 } as never);
+    vi.spyOn(Doctor, "find").mockReturnValue({ select: () => ({ lean: async () => data.doctors.map((doctor) => ({ _id: doctor._id })) }) } as never);
+    expect(await seedDevelopmentData(mongooseSeedRepository, data)).toEqual({ doctorsInserted: 0, doctorsSkipped: 30, patientsInserted: 0, patientsSkipped: 150 });
+  });
+});
+
+describe("seed data covers every dashboard view", () => {
+  const now = new Date("2026-11-11T12:00:00.000Z");
+  const data = generateSeedData(now);
+  const countIn = (period: "7d" | "30d" | "90d" | "12m") => {
+    const range = resolveRange({ period }, now);
+    return buildBuckets(range).map((bucket) => data.patients.filter((patient) =>
+      patient.createdAt >= range.from && patient.createdAt < range.toExclusive && truncateDate(patient.createdAt, range.granularity).toISOString().slice(0, 10) === bucket.key).length);
+  };
+
+  it("fills the daily, weekly, and monthly trends", () => {
+    expect(countIn("7d").reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(3);
+    expect(countIn("30d").reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(15);
+    expect(countIn("90d").filter((count) => count > 0).length).toBeGreaterThanOrEqual(12);
+    const months = countIn("12m");
+    expect(months).toHaveLength(12);
+    expect(months.every((count) => count > 0)).toBe(true); // registrations in every one of the last 12 months
+    expect(months.reduce((a, b) => a + b, 0)).toBe(150);
+  });
+
+  it("varies conditions within short periods", () => {
+    const range = resolveRange({ period: "30d" }, now);
+    const recent = data.patients.filter((patient) => patient.createdAt >= range.from && patient.createdAt < range.toExclusive);
+    expect(new Set(recent.map((patient) => patient.condition)).size).toBeGreaterThanOrEqual(10);
+  });
+
+  it("produces a ranked caseload chart with idle doctors", () => {
+    const caseloads = data.doctors.map((doctor) => data.patients.filter((patient) => String(patient.doctorId) === String(doctor._id)).length);
+    expect(caseloads.filter((count) => count === 0).length).toBeGreaterThanOrEqual(2);
+    expect(new Set(caseloads).size).toBeGreaterThanOrEqual(8);
   });
 });

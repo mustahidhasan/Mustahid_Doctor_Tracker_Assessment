@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import { useFocusTrap } from "./useFocusTrap";
 
 interface ModalProps {
   title: string;
@@ -10,27 +11,17 @@ interface ModalProps {
   size?: "sm" | "md";
 }
 
-/** Accessible modal dialog: focus moves inside, Escape and backdrop clicks close it, page scroll is locked. */
+/** Accessible modal dialog: focus is trapped inside, Escape and backdrop clicks close it, focus returns afterwards, page scroll is locked. */
 export function Modal({ title, description, onClose, children, size = "md" }: ModalProps) {
   const titleId = useId();
   const descriptionId = useId();
   const panel = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useFocusTrap(panel, true, onClose, () => panel.current?.querySelector<HTMLElement>("input, select, textarea, button:not([data-modal-close])"));
 
   useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const firstField = panel.current?.querySelector<HTMLElement>("input, select, textarea, button:not([data-modal-close])");
-    (firstField ?? panel.current)?.focus();
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeRef.current(); };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previousFocus?.focus?.();
-    };
+    return () => { document.body.style.overflow = previousOverflow; };
   }, []);
 
   return (
@@ -44,7 +35,7 @@ export function Modal({ title, description, onClose, children, size = "md" }: Mo
             {description && <p id={descriptionId} className="mt-1.5 text-sm leading-6 text-slate-600">{description}</p>}
           </div>
           <button type="button" data-modal-close onClick={onClose} aria-label="Close dialog"
-            className="-mr-2 -mt-1 rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500">
+            className="-mr-2 -mt-1 grid h-10 w-10 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500">
             <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
           </button>
         </div>

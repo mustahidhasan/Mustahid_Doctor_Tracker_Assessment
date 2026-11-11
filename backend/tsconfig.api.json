@@ -1,0 +1,7 @@
+{
+  // Type-checks the Vercel Function entry (api/), which lives outside src/ and is not emitted by `npm run build`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "noEmit": true, "declaration": false, "declarationMap": false, "sourceMap": false },
+  "include": ["api/**/*.ts", "src/**/*.d.ts"],
+  "exclude": []
+}

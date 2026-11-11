@@ -23,12 +23,29 @@ export function requireTrustedOriginForWrites(request: Request, response: Respon
   return requireTrustedOrigin(request, response, next);
 }
 
+/** Baseline security headers for every API response. JSON APIs are never framed, sniffed, or cached. */
+export function securityHeaders(_request: Request, response: Response, next: NextFunction) {
+  response.set({
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "same-site",
+    "Cache-Control": "no-store",
+  });
+  next();
+}
+
 export function notFound(_request: Request, response: Response) {
   response.status(404).json({ error: "Route not found" });
 }
 
 export function errorHandler(error: unknown, _request: Request, response: Response, _next: NextFunction) {
   if (error instanceof SyntaxError && "body" in error) return response.status(400).json({ error: "Malformed JSON request" });
+  // body-parser client errors (e.g. body over the 16 KB limit, unsupported charset/encoding).
+  const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : NaN;
+  if (status === 413) return response.status(413).json({ error: "Request body is too large" });
+  if (status === 415) return response.status(415).json({ error: "Unsupported request encoding" });
+  if (status >= 400 && status < 500 && (error as { expose?: boolean }).expose) return response.status(status).json({ error: "Invalid request" });
   if (error instanceof AppError) return response.status(error.statusCode).json({ error: error.message, ...(error.details ? { details: error.details } : {}) });
   // Never expose raw MongoDB/Mongoose errors; map known input-related failures to a generic 400.
   if (error instanceof mongoose.Error.CastError || error instanceof mongoose.Error.ValidationError) {

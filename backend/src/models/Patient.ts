@@ -43,10 +43,16 @@ const patientSchema = new Schema<IPatient>(
   { timestamps: true },
 );
 
-patientSchema.index({ doctorId: 1, createdAt: -1 });
+// Indexes matched to the real query patterns (all list sorts end with an `_id` tiebreaker):
+// - { doctorId: 1, createdAt: -1, _id: -1 }: a doctor's patients newest-first, the doctor filter,
+//   distinct(doctorId), and the delete-restriction check.
+// - { createdAt: -1, _id: -1 }: default "newest"/"oldest" list sort, date ranges, dashboard trends.
+// - { name: 1, _id: 1 }: name A–Z / Z–A sorts.
+// - { condition: 1 }: condition filter and distinct() for filter options.
+patientSchema.index({ doctorId: 1, createdAt: -1, _id: -1 });
+patientSchema.index({ createdAt: -1, _id: -1 });
+patientSchema.index({ name: 1, _id: 1 });
 patientSchema.index({ condition: 1 });
-patientSchema.index({ name: 1 });
-patientSchema.index({ createdAt: -1 });
 
 export type PatientDocument = HydratedDocument<IPatient>;
 export const Patient = (models.Patient as Model<IPatient> | undefined) ?? model<IPatient>("Patient", patientSchema);

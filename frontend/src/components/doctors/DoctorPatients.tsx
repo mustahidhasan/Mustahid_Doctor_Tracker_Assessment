@@ -96,7 +96,7 @@ export function DoctorPatients({ doctorId, patients, total, onAdd, onRemove }: D
           {patients.map((patient) => (
             <li key={patient._id} className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
               <div className="min-w-0">
-                <h3 className="font-semibold text-slate-900"><Link href={`/patients/${patient._id}`} className="hover:text-teal-700 focus:outline-none focus-visible:underline">{patient.name}</Link></h3>
+                <h3 className="font-semibold text-slate-900"><Link href={`/patients/${patient._id}`} className="inline-flex min-h-6 items-center hover:text-teal-700 focus:outline-none focus-visible:underline">{patient.name}</Link></h3>
                 <p className="mt-0.5 text-sm text-slate-600">{patient.condition}</p>
                 <p className="mt-1 break-all text-xs text-slate-500">{[patient.phone, patient.email, `Added ${formatDate(patient.createdAt)}`].filter(Boolean).join(" · ")}</p>
               </div>
