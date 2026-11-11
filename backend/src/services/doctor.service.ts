@@ -2,22 +2,21 @@ import type { QueryFilter } from "mongoose";
 import { AppError } from "../errors/AppError.js";
 import { Doctor, type IDoctor } from "../models/Doctor.js";
 import { Patient } from "../models/Patient.js";
+import { createdAtRange, escapeRegex } from "../validators/common.js";
 import type { DoctorInput, DoctorListQuery, DoctorUpdate, PatientInput } from "../validators/doctor.validator.js";
+import { createPatient, deletePatient } from "./patient.service.js";
+
+export { escapeRegex };
 
 const DOCTOR_FIELDS = "name specialization hospital phone email createdAt updatedAt";
 const PATIENT_FIELDS = "name condition phone email doctorId createdAt updatedAt";
 export const DOCTOR_PATIENT_LIMIT = 100;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const SORTS = {
   newest: { createdAt: -1, _id: -1 },
   oldest: { createdAt: 1, _id: 1 },
   name: { name: 1, _id: 1 },
 } as const;
-
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 export function buildDoctorFilter(query: Pick<DoctorListQuery, "search" | "specialization" | "hospital" | "dateFrom" | "dateTo">): QueryFilter<IDoctor> {
   const filter: QueryFilter<IDoctor> = {};
@@ -29,13 +28,8 @@ export function buildDoctorFilter(query: Pick<DoctorListQuery, "search" | "speci
   // Exact matches can use the single-field indexes. The UI supplies values from /filter-options.
   if (query.specialization) filter.specialization = query.specialization;
   if (query.hospital) filter.hospital = query.hospital;
-  if (query.dateFrom || query.dateTo) {
-    filter.createdAt = {
-      ...(query.dateFrom ? { $gte: query.dateFrom } : {}),
-      // dateTo is inclusive: everything before the start of the following UTC day.
-      ...(query.dateTo ? { $lt: new Date(query.dateTo.getTime() + DAY_MS) } : {}),
-    };
-  }
+  const createdAt = createdAtRange(query.dateFrom, query.dateTo);
+  if (createdAt) filter.createdAt = createdAt;
   return filter;
 }
 
@@ -110,21 +104,14 @@ export async function listDoctorPatients(doctorId: string) {
   return { data, total, limit: DOCTOR_PATIENT_LIMIT };
 }
 
+/** Nested Module 4 endpoint; shares the creation logic with POST /api/patients. */
 export async function createDoctorPatient(doctorId: string, input: PatientInput) {
   if (!await Doctor.exists({ _id: doctorId })) throw new AppError(404, "Doctor not found");
-  const patient = await Patient.create({
-    doctorId,
-    name: input.name,
-    condition: input.condition,
-    ...(input.phone ? { phone: input.phone } : {}),
-    ...(input.email ? { email: input.email } : {}),
-  });
-  return patient.toObject();
+  return createPatient({ ...input, doctorId }, { doctorVerified: true });
 }
 
 export async function deleteDoctorPatient(doctorId: string, patientId: string) {
   if (!await Doctor.exists({ _id: doctorId })) throw new AppError(404, "Doctor not found");
   // Scoping by doctorId prevents deleting another doctor's patient through this endpoint.
-  const result = await Patient.deleteOne({ _id: patientId, doctorId });
-  if (result.deletedCount === 0) throw new AppError(404, "Patient not found for this doctor");
+  await deletePatient(patientId, { doctorId, notFoundMessage: "Patient not found for this doctor" });
 }

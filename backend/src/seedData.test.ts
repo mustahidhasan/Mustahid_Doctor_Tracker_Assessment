@@ -70,6 +70,7 @@ describe("generated seed data", () => {
     expect(new Set(data.doctors.map((doctor) => doctor.specialization)).size).toBeGreaterThanOrEqual(10);
     expect(new Set(data.doctors.map((doctor) => doctor.hospital)).size).toBeGreaterThanOrEqual(6);
     expect(new Set(data.doctors.map((doctor) => doctor.name)).size).toBe(30);
+    expect(new Set(data.patients.map((patient) => patient.condition)).size).toBeGreaterThanOrEqual(25);
     expect(data.doctors.length).toBeGreaterThan(20); // three pages at the default page size of 10
     const yearAgo = REFERENCE.getTime() - 365 * DAY_MS;
     for (const record of [...data.doctors, ...data.patients]) {
