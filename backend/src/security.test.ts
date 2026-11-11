@@ -56,6 +56,34 @@ describe("login brute-force protection", () => {
   });
 });
 
+describe("trusted origins (CORS_ORIGIN)", () => {
+  it("normalizes trailing slashes, paths, quotes, and spaces to exact origins", async () => {
+    const { allowedOrigins } = await import("./middleware/security.js");
+    expect(allowedOrigins(' "https://doctor-tracker-web.vercel.app/" , https://admin.example.com/login ,http://localhost:3000 ')).toEqual([
+      "https://doctor-tracker-web.vercel.app", "https://admin.example.com", "http://localhost:3000",
+    ]);
+    expect(allowedOrigins("not a url, ftp://files.example.com, ")).toEqual([]);
+  });
+
+  it("accepts the configured frontend even when CORS_ORIGIN has a trailing slash (regression)", async () => {
+    vi.stubEnv("CORS_ORIGIN", "https://doctor-tracker-web.vercel.app/");
+    vi.spyOn(User, "findOne").mockReturnValue(queryResult(null) as never);
+    const response = await request(app).post("/api/auth/login").set("Origin", "https://doctor-tracker-web.vercel.app")
+      .set("Sec-Fetch-Site", "same-origin").send({ email: "origin-check@example.com", password: "wrong-password" });
+    expect(response.status).toBe(401); // reached the credential check, not blocked as 403
+  });
+
+  it("still rejects other origins and lookalike hosts, and logs the rejected origin", async () => {
+    vi.stubEnv("CORS_ORIGIN", "https://doctor-tracker-web.vercel.app/");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    for (const origin of ["https://evil.example", "https://doctor-tracker-web.vercel.app.evil.example", "http://doctor-tracker-web.vercel.app", "https://doctor-tracker-web-a1b2c3.vercel.app"]) {
+      await request(app).post("/api/auth/login").set("Origin", origin).send({ email: "a@b.co", password: "x" }).expect(403);
+    }
+    expect(warn.mock.calls.flat().join(" ")).toContain('Rejected request origin "https://evil.example"');
+    expect(warn.mock.calls.flat().join(" ")).toContain("allowed: https://doctor-tracker-web.vercel.app");
+  });
+});
+
 describe("injection and input hardening", () => {
   it("rejects MongoDB operator objects in login and record bodies", async () => {
     const findOne = vi.spyOn(User, "findOne");

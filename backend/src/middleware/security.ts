@@ -2,14 +2,33 @@ import type { NextFunction, Request, Response } from "express";
 import mongoose from "mongoose";
 import { AppError } from "../errors/AppError.js";
 
-function trustedOrigins(): Set<string> {
-  return new Set((process.env.CORS_ORIGIN || "http://localhost:3000").split(",").map((value) => value.trim()).filter(Boolean));
+/**
+ * Allowed browser origins from CORS_ORIGIN (comma-separated). Each entry is normalized to its exact
+ * origin (scheme + host + port), so harmless formatting such as a trailing slash, a path, or
+ * surrounding quotes still matches what browsers send. Invalid entries are ignored.
+ */
+export function allowedOrigins(value = process.env.CORS_ORIGIN || "http://localhost:3000"): string[] {
+  const origins = new Set<string>();
+  for (const entry of value.split(",")) {
+    const cleaned = entry.trim().replace(/^['"]|['"]$/g, "").trim();
+    if (!cleaned) continue;
+    try {
+      const url = new URL(cleaned);
+      if (url.protocol === "http:" || url.protocol === "https:") origins.add(url.origin);
+    } catch {
+      // not a URL: ignore
+    }
+  }
+  return [...origins];
 }
 
 export function requireTrustedOrigin(request: Request, response: Response, next: NextFunction) {
   const fetchSite = request.get("sec-fetch-site");
   const origin = request.get("origin");
-  if (fetchSite === "cross-site" || (origin && !trustedOrigins().has(origin))) {
+  const allowed = allowedOrigins();
+  if (fetchSite === "cross-site" || (origin && !allowed.includes(origin))) {
+    // Origins are public values; logging them makes a CORS_ORIGIN mismatch easy to diagnose.
+    console.warn(`Rejected request origin "${origin ?? "(none)"}" (sec-fetch-site: ${fetchSite ?? "n/a"}); allowed: ${allowed.join(", ") || "(none configured)"}`);
     return response.status(403).json({ error: "Untrusted request origin" });
   }
   return next();

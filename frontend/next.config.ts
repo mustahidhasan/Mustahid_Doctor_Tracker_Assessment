@@ -1,5 +1,22 @@
 import type { NextConfig } from "next";
 
+/**
+ * Backend origin for the /api/* proxy (read at build time). Normalized to scheme + host + port, so a
+ * trailing slash, an "/api" suffix, quotes or spaces cannot produce "//api" or "/api/api" URLs.
+ * On Vercel builds it must be set; locally it defaults to the Express dev server.
+ */
+export function apiProxyTarget(environment: Record<string, string | undefined> = process.env): string {
+  const raw = environment.API_PROXY_TARGET?.trim().replace(/^['"]|['"]$/g, "").trim();
+  if (!raw) {
+    if (environment.VERCEL) throw new Error("API_PROXY_TARGET is not set for this Vercel deployment. Set it to the backend URL (e.g. https://doctor-tracker-api.vercel.app) and redeploy.");
+    return "http://localhost:5000";
+  }
+  let url: URL;
+  try { url = new URL(raw); } catch { throw new Error(`API_PROXY_TARGET must be a full URL such as https://doctor-tracker-api.vercel.app (got "${raw}").`); }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("API_PROXY_TARGET must use http or https.");
+  return url.origin;
+}
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   agentRules: false,
@@ -21,8 +38,7 @@ const nextConfig: NextConfig = {
     }];
   },
   async rewrites() {
-    const target = process.env.API_PROXY_TARGET || "http://localhost:5000";
-    return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
+    return [{ source: "/api/:path*", destination: `${apiProxyTarget()}/api/:path*` }];
   },
 };
 
